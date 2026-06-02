@@ -4,13 +4,14 @@ The registry is a module-level singleton: ``initialize_backend()`` is called
 once in arq ``on_startup`` and stores the result. Worker tasks call
 ``get_initialized_backend()`` to retrieve it from the module state.
 
-To override in tests, set ``SUMMARIZER_BACKEND=noop`` in the environment
-before importing this module, or patch ``_initialized_backend`` directly.
+To override in tests, set ``SUMMARIZER_BACKEND`` in the environment (or
+``.env``) before calling ``initialize_backend()``, or patch
+``_initialized_backend`` directly.
 """
 
 import logging
-import os
 
+from app.config import Settings
 from app.worker.backends.base import SummarizerBackend
 from app.worker.backends.noop import NoopSummarizer
 from app.worker.backends.transformer import TransformerSummarizer
@@ -52,13 +53,14 @@ def _try_init(cls: type, name: str) -> SummarizerBackend | None:
 def initialize_backend() -> SummarizerBackend:
     """Select, initialize, and cache the backend for this worker process.
 
-    Reads ``SUMMARIZER_BACKEND`` from the environment. Falls through to the
-    next entry in ``_FALLBACK_ORDER`` if the requested backend is unavailable
-    or fails to load. Always returns a working backend (at minimum NoopSummarizer).
+    Reads ``summarizer_backend`` from :class:`~app.config.Settings` (env
+    ``SUMMARIZER_BACKEND`` or ``.env``). Falls through to the next entry in
+    ``_FALLBACK_ORDER`` if the requested backend is unavailable or fails to
+    load. Always returns a working backend (at minimum NoopSummarizer).
     """
     global _initialized_backend
 
-    name = os.getenv("SUMMARIZER_BACKEND", "noop")
+    name = Settings().summarizer_backend
 
     if name not in _BACKENDS:
         logger.warning(
