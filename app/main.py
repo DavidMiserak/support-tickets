@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage the arq Redis connection pool for the lifetime of the process."""
+    """Manage the arq Redis connection pool for the lifetime of the process.
+
+    Redis is optional at startup: if unavailable, the API still serves requests
+    and enqueue is skipped (same best-effort behavior as per-request enqueue).
+    """
+    set_arq_pool(None)
     try:
         pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         set_arq_pool(pool)
@@ -33,11 +38,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.error(
             "Could not connect to Redis at %s: %s. "
-            "Set REDIS_URL or start Redis with `docker compose up redis -d`.",
+            "API will start without background enqueue; "
+            "set REDIS_URL or start Redis with `docker compose up redis -d`.",
             settings.redis_url,
             exc,
         )
-        raise
     try:
         yield
     finally:

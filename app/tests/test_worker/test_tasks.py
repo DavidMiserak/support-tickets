@@ -40,8 +40,7 @@ async def test_summarize_ticket_writes_summarized_event(ticket, worker_ctx, test
         )
     )
     event = result.scalar_one()
-    assert event.new_value is not None
-    assert len(event.new_value) > 0
+    assert event.new_value == ticket.description
 
 
 async def test_summarize_ticket_no_op_when_ticket_missing(worker_ctx, test_db):
