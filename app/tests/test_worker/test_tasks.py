@@ -80,6 +80,58 @@ async def test_summarize_ticket_skips_short_description(worker_ctx, test_db):
     assert result.scalar_one_or_none() is None
 
 
+async def test_summarize_ticket_boundary_exactly_4_words_skips(worker_ctx, test_db):
+    """Exactly 4 words (one below the threshold) still skips summarization."""
+    t = Ticket(
+        customer_name="Carol",
+        customer_email="carol@example.com",
+        subject="Help",
+        description="one two three four",
+        priority="LOW",
+        category="OTHER",
+    )
+    test_db.add(t)
+    await test_db.flush()
+    await test_db.commit()
+    await test_db.refresh(t)
+
+    await summarize_ticket(worker_ctx, t.id)
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == t.id,
+            TicketEvent.event_type == EventType.SUMMARIZED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
+
+
+async def test_summarize_ticket_boundary_exactly_5_words_proceeds(worker_ctx, test_db):
+    """Exactly 5 words (at the threshold) does proceed to summarization."""
+    t = Ticket(
+        customer_name="Dan",
+        customer_email="dan@example.com",
+        subject="Help",
+        description="one two three four five",
+        priority="LOW",
+        category="OTHER",
+    )
+    test_db.add(t)
+    await test_db.flush()
+    await test_db.commit()
+    await test_db.refresh(t)
+
+    await summarize_ticket(worker_ctx, t.id)
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == t.id,
+            TicketEvent.event_type == EventType.SUMMARIZED,
+        )
+    )
+    assert result.scalar_one() is not None
+
+
 async def test_summarize_ticket_skips_on_summarizer_error(ticket, test_db, worker_ctx):
     """When the summarizer raises, no event is written and no exception leaks."""
     from unittest.mock import AsyncMock

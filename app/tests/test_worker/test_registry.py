@@ -44,6 +44,19 @@ def test_registry_warns_and_falls_through_on_unknown_backend(monkeypatch, caplog
     assert "unknown SUMMARIZER_BACKEND" in caplog.text
 
 
+def test_registry_falls_through_when_is_available_false(monkeypatch):
+    """If is_available() returns False, the registry falls through to NoopSummarizer."""
+    monkeypatch.setenv("SUMMARIZER_BACKEND", "transformer")
+
+    with patch(
+        "app.worker.backends.transformer.TransformerSummarizer.is_available",
+        return_value=False,
+    ):
+        backend = registry_module.initialize_backend()
+
+    assert isinstance(backend, NoopSummarizer)
+
+
 def test_registry_falls_through_when_load_model_fails(monkeypatch):
     """If load_model() raises, the registry falls through to NoopSummarizer."""
     monkeypatch.setenv("SUMMARIZER_BACKEND", "transformer")

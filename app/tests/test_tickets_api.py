@@ -87,6 +87,58 @@ async def test_list_rejects_out_of_range_limit(async_client):
 
 
 @pytest.mark.asyncio
+async def test_list_rejects_limit_too_large(async_client):
+    resp = await async_client.get("/tickets", params={"limit": 101})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_rejects_negative_skip(async_client):
+    resp = await async_client.get("/tickets", params={"skip": -1})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_invalid_enum_returns_422_envelope(async_client):
+    resp = await async_client.post(
+        "/tickets", json={**VALID_TICKET, "category": "BADVAL"}
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_type"] == "validation_error"
+    assert "errors" in body
+
+
+@pytest.mark.asyncio
+async def test_patch_invalid_status_returns_422_envelope(async_client):
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "BOGUS"}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error_type"] == "validation_error"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_update_returns_409(async_client, monkeypatch):
+    """ConcurrentUpdateError from the service maps to 409 concurrent_update."""
+    from app.errors import ConcurrentUpdateError
+    from app.services.ticket import TicketService
+
+    async def boom(*_args, **_kwargs):
+        raise ConcurrentUpdateError(1)
+
+    monkeypatch.setattr(TicketService, "update_status", boom)
+
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "IN_PROGRESS"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error_type"] == "concurrent_update"
+
+
+@pytest.mark.asyncio
 async def test_status_transition_legal(async_client):
     created = await _create(async_client)
     resp = await async_client.patch(
