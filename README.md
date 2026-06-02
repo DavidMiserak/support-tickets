@@ -61,13 +61,21 @@ make test-db             # start PostgreSQL in a container
 make local-run           # run uvicorn with autoreload
 ```
 
+To run the worker locally with DistilBART summarization:
+
+```bash
+make install-ml          # adds torch + transformers (see requirements-ml.txt)
+SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
+```
+
 ## Environment Variables
 
-| Variable       | Description                                  | Default (Compose)                                                      |
-|----------------|----------------------------------------------|------------------------------------------------------------------------|
-| `DATABASE_URL` | Async SQLAlchemy connection URL (`+asyncpg`) | `postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport` |
-| `REDIS_URL`    | Redis URL for the worker queue (Phase 3)     | `redis://redis:6379`                                                   |
-| `DEBUG`        | Enable debug behavior                        | `false`                                                                |
+| Variable              | Description                                  | Default (Compose)                                                      |
+|-----------------------|----------------------------------------------|------------------------------------------------------------------------|
+| `DATABASE_URL`        | Async SQLAlchemy connection URL (`+asyncpg`) | `postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport` |
+| `REDIS_URL`           | Redis URL for the worker queue               | `redis://redis:6379`                                                   |
+| `SUMMARIZER_BACKEND`  | Worker summarizer: `noop` or `transformer`   | `noop` (worker service only)                                           |
+| `DEBUG`               | Enable debug behavior                        | `false`                                                                |
 
 ## API Documentation
 
@@ -131,9 +139,26 @@ When Redis and the worker are running, creating a ticket enqueues a
   and not retried automatically
 - With `SUMMARIZER_BACKEND=noop` (the compose default), the stored summary
   equals the ticket description unchanged
+- Summaries are **internal only** for now: they are written as `SUMMARIZED`
+  rows in `ticket_events`, not exposed on the ticket API
+- Duplicate `SUMMARIZED` events are allowed (e.g. manual re-enqueue); there is
+  no DB uniqueness constraint yet
 
 There is no re-summarize endpoint yet; a failed or skipped job is not
 backfilled unless you add that explicitly later.
+
+### Transformer summarizer (optional)
+
+The default stack uses `noop` so containers start without ML dependencies.
+To enable DistilBART (`sshleifer/distilbart-cnn-6-6`):
+
+1. Install optional deps: `make install-ml` or `pip install -r requirements-ml.txt`
+2. Set `SUMMARIZER_BACKEND=transformer` for the worker process
+3. On first run, HuggingFace downloads ~300 MB of weights to the local cache
+
+The runtime `Containerfile` does not include `requirements-ml.txt`; extend the
+worker image (e.g. `RUN pip install -r requirements-ml.txt` in a custom build)
+if you want transformer mode in Compose.
 
 ## Testing
 
@@ -151,6 +176,7 @@ make help         # list all available targets
 make run          # build and start the stack
 make health       # curl the /health endpoint
 make migrate      # apply database migrations in the running container
+make install-ml   # optional: torch + transformers for local worker ML runs
 make clean        # remove caches and build artifacts
 ```
 

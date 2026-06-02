@@ -27,6 +27,7 @@ help:
 	@echo "  local-venv         Create .venv if missing"
 	@echo "  install            Install runtime dependencies"
 	@echo "  install-dev        Install runtime + test dependencies"
+	@echo "  install-ml         Install runtime + ML deps (transformer summarizer)"
 	@echo ""
 	@echo "Quality:"
 	@echo "  test               Run tests in container (default), fallback to local"
@@ -77,6 +78,14 @@ local-install-dev: local-venv
 
 .PHONY: install-dev
 install-dev: local-install-dev
+
+.PHONY: local-install-ml
+local-install-ml: local-venv
+	$(PIP) install --upgrade pip
+	$(PIP) install -r requirements-ml.txt
+
+.PHONY: install-ml
+install-ml: local-install-ml
 
 .PHONY: pre-commit-setup
 pre-commit-setup:
