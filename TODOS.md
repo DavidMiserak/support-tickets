@@ -67,7 +67,7 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] ~~**Native PG ENUM vs VARCHAR+CHECK.**~~ Resolved (autoplan): new `event_type` uses VARCHAR+CHECK (Phase 2a). Existing native enums (`TicketStatus`/`Priority`/`Category`) stay as documented known-debt — revisit only if an `ALTER TYPE` becomes painful.
 - [x] ~~**`assigned_agent_id` has no `ON DELETE` rule.**~~ Resolved: `SET NULL` on both agent FKs (Phase 2a).
 - [x] ~~**Concurrent updates / optimistic locking.**~~ Pulled into Phase 2b (version/`updated_at` guard + concurrent test).
-- [ ] **Connection math.** ~~`pool_size=20 + max_overflow=10` = 30/process vs Postgres default `max_connections=100`. Document the ceiling before running API + worker + multiple uvicorn workers.~~ Documented in README “Connection budget”.
+- [x] **Connection math.** ~~`pool_size=20 + max_overflow=10` = 30/process vs Postgres default `max_connections=100`. Document the ceiling before running API + worker + multiple uvicorn workers.~~ Documented in README “Connection budget”.
 
 ## DX / tooling fixes
 

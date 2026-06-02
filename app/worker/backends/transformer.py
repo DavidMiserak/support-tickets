@@ -7,7 +7,8 @@ block the arq event loop. The model is loaded once at worker startup via
 
 import asyncio
 import logging
-from typing import Any
+import threading
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class TransformerSummarizer:
 
     def __init__(self) -> None:
         self._pipe: Any = None
+        self._inference_lock = threading.Lock()
 
     def is_available(self) -> bool:
         """True only when both torch and transformers are importable."""
@@ -56,13 +58,18 @@ class TransformerSummarizer:
             raise RuntimeError("TransformerSummarizer.load_model() was not called")
 
         loop = asyncio.get_running_loop()
-        result: list[dict[str, str]] = await loop.run_in_executor(
-            None,
-            lambda: self._pipe(
-                text,
-                max_length=130,
-                min_length=10,
-                truncation=True,
-            ),
-        )
+
+        def _run_inference() -> list[dict[str, str]]:
+            with self._inference_lock:
+                return cast(
+                    list[dict[str, str]],
+                    self._pipe(
+                        text,
+                        max_length=130,
+                        min_length=10,
+                        truncation=True,
+                    ),
+                )
+
+        result = await loop.run_in_executor(None, _run_inference)
         return result[0]["summary_text"]

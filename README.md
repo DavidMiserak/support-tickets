@@ -172,6 +172,12 @@ To enable DistilBART (`sshleifer/distilbart-cnn-6-6`):
 2. Set `SUMMARIZER_BACKEND=transformer` for the worker process
 3. On first run, HuggingFace downloads ~300 MB of weights to the local cache
 
+The worker defaults to `max_jobs=10`, but the HuggingFace pipeline object is
+**not thread-safe**. `TransformerSummarizer` serializes inference with a
+process-wide lock so concurrent arq jobs do not corrupt shared model state.
+If you need higher throughput, run multiple worker replicas (each with its own
+process and model copy) rather than raising `max_jobs` alone.
+
 The runtime `Containerfile` does not include `requirements-ml.txt`; extend the
 worker image (e.g. `RUN pip install -r requirements-ml.txt` in a custom build)
 if you want transformer mode in Compose.
