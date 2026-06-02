@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.api import tickets
-from app.arq_pool import get_arq_pool, set_arq_pool  # noqa: F401 (re-exported)
+from app.arq_pool import get_arq_pool, set_arq_pool
 from app.config import settings
 from app.errors import (
     INTERNAL_SERVER_ERROR_DETAIL,

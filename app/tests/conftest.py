@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.arq_pool import get_arq_pool
-from app.database import Base, async_session_factory, get_session
+from app.database import Base, get_session
 from app.main import app
 
 TEST_DATABASE_URL = os.getenv(
@@ -94,14 +94,12 @@ async def async_client(
 
 
 @pytest.fixture
-async def worker_ctx(test_db: AsyncSession) -> dict[str, object]:
+async def worker_ctx(test_db: AsyncSession) -> AsyncGenerator[dict[str, object], None]:
     """arq-style context dict for calling worker tasks directly in tests.
 
     Injects a NoopSummarizer and a session factory that uses the test DB,
     so tasks can be unit-tested without Redis or a real worker process.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from app.worker.backends.noop import NoopSummarizer
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -109,7 +107,9 @@ async def worker_ctx(test_db: AsyncSession) -> dict[str, object]:
         engine, class_=AsyncSession, expire_on_commit=False
     )
 
-    return {
+    yield {
         "summarizer": NoopSummarizer(),
         "session_factory": test_session_factory,
     }
+
+    await engine.dispose()
