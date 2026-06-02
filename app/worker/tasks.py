@@ -3,10 +3,14 @@
 import logging
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from app.enums import EventType
 from app.models import Ticket, TicketEvent
 
 logger = logging.getLogger(__name__)
+
+_MIN_SUMMARY_WORDS = 5
 
 
 async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
@@ -17,9 +21,9 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
 
     Failure modes:
     - Ticket deleted before execution: no-op (logged, no event written).
-    - Summarizer raises: logged, no event written; arq will not retry
-      (max_tries=1 on this function).
-    - DB commit fails: exception propagates, arq retries up to max_tries.
+    - Summarizer raises: logged, no event written; no retry (max_tries=1 in WorkerSettings).
+    - Ticket deleted between read and write sessions: IntegrityError caught, no-op.
+    - DB commit fails for other reasons: exception propagates; no retry (max_tries=1).
     """
     logger.info("summarize_ticket: started", extra={"ticket_id": ticket_id})
 
@@ -39,10 +43,11 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
         return
 
     description = ticket.description or ""
-    if len(description.split()) < 5:
+    words = description.split()
+    if len(words) < _MIN_SUMMARY_WORDS:
         logger.info(
             "summarize_ticket: description too short to summarize, skipping",
-            extra={"ticket_id": ticket_id, "word_count": len(description.split())},
+            extra={"ticket_id": ticket_id, "word_count": len(words)},
         )
         return
 
@@ -55,14 +60,22 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
         )
         return
 
-    async with session_factory() as session:
-        event = TicketEvent(
-            ticket_id=ticket_id,
-            event_type=EventType.SUMMARIZED,
-            new_value=summary,
+    try:
+        async with session_factory() as session:
+            event = TicketEvent(
+                ticket_id=ticket_id,
+                event_type=EventType.SUMMARIZED,
+                new_value=summary,
+            )
+            session.add(event)
+            await session.commit()
+    except IntegrityError:
+        # Ticket was deleted between the read and write sessions — treat as no-op.
+        logger.warning(
+            "summarize_ticket: ticket deleted before event write, skipping",
+            extra={"ticket_id": ticket_id},
         )
-        session.add(event)
-        await session.commit()
+        return
 
     logger.info(
         "summarize_ticket: complete",

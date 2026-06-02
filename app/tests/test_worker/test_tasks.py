@@ -80,30 +80,13 @@ async def test_summarize_ticket_skips_short_description(worker_ctx, test_db):
     assert result.scalar_one_or_none() is None
 
 
-async def test_summarize_ticket_skips_on_summarizer_error(ticket, test_db):
+async def test_summarize_ticket_skips_on_summarizer_error(ticket, test_db, worker_ctx):
     """When the summarizer raises, no event is written and no exception leaks."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
-
-    from sqlalchemy.ext.asyncio import (
-        AsyncSession,
-        async_sessionmaker,
-        create_async_engine,
-    )
-
-    engine = create_async_engine(
-        os.getenv(
-            "TEST_DATABASE_URL",
-            "postgresql+asyncpg://ticketsupport:ticketsupport@localhost:5432/ticketsupport_test",
-        ),
-        echo=False,
-    )
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    from unittest.mock import AsyncMock
 
     broken_summarizer = AsyncMock()
     broken_summarizer.summarize.side_effect = RuntimeError("inference failed")
-
-    ctx = {"summarizer": broken_summarizer, "session_factory": factory}
+    ctx = {**worker_ctx, "summarizer": broken_summarizer}
 
     await summarize_ticket(ctx, ticket.id)  # must not raise
 
@@ -114,4 +97,3 @@ async def test_summarize_ticket_skips_on_summarizer_error(ticket, test_db):
         )
     )
     assert result.scalar_one_or_none() is None
-    await engine.dispose()
