@@ -40,6 +40,7 @@ help:
 	@echo "  container-up       Build and start API + DB"
 	@echo "  container-down     Stop and remove compose services"
 	@echo "  container-logs     Tail API logs"
+	@echo "  worker-logs        Tail background worker logs"
 	@echo "  container-test     Run tests in test container"
 	@echo "  container-coverage Run coverage in test container (writes coverage.xml)"
 	@echo "  migrate            Apply DB migrations in running API container"
@@ -167,6 +168,10 @@ container-down:
 .PHONY: container-logs
 container-logs:
 	$(COMPOSE) logs -f api
+
+.PHONY: worker-logs
+worker-logs:
+	$(COMPOSE) logs -f worker
 
 .PHONY: migrate
 migrate:

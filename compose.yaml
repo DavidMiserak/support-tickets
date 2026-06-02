@@ -13,6 +13,37 @@ services:
                 condition: service_healthy
         restart: unless-stopped
 
+    redis:
+        image: docker.io/library/redis:7-alpine
+        # Message broker for the arq background worker.
+        ports:
+            - "6379:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+        restart: unless-stopped
+
+    worker:
+        build:
+            context: .
+            dockerfile: Containerfile
+        # Runs the arq background worker. Picks up jobs enqueued by the API.
+        command: python -m arq app.worker.main.WorkerSettings
+        environment:
+            DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
+            REDIS_URL: redis://redis:6379
+            # Default: noop (no model download). Set to "transformer" to enable
+            # DistilBART summarization (first run downloads ~300 MB from HuggingFace).
+            SUMMARIZER_BACKEND: noop
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+
     # Run the test suite against a real Postgres. Enabled only via the `test`
     # profile: `docker compose --profile test run --rm test`.
     test:
@@ -25,6 +56,8 @@ services:
             TEST_DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport_test
         depends_on:
             db:
+                condition: service_healthy
+            redis:
                 condition: service_healthy
 
     db:

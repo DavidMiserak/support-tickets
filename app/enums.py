@@ -51,10 +51,11 @@ class EventType(str, Enum):
     """Audit-trail event types.
 
     Stored as VARCHAR + CHECK (not a native PG enum) so values can be added with
-    a plain migration instead of an ``ALTER TYPE``. ``ASSIGNED`` lands when the
-    assign-agent endpoint does.
+    a plain migration instead of an ``ALTER TYPE``.
     """
 
     CREATED = "CREATED"
     STATUS_CHANGED = "STATUS_CHANGED"
     PRIORITY_CHANGED = "PRIORITY_CHANGED"
+    ASSIGNED = "ASSIGNED"
+    SUMMARIZED = "SUMMARIZED"

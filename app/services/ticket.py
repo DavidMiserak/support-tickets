@@ -5,6 +5,9 @@ events, and is the single place that commits. It also owns the status
 state machine and translates an optimistic-lock clash into a domain error.
 """
 
+import logging
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -17,6 +20,8 @@ from app.errors import (
 from app.models import Ticket, TicketEvent
 from app.repositories.ticket import TicketRepository
 from app.schemas import CreateTicketRequest
+
+logger = logging.getLogger(__name__)
 
 # Allowed status moves. CLOSED is terminal; a ticket reopens via
 # RESOLVED -> IN_PROGRESS. A status is never in its own set (same-status
@@ -36,12 +41,22 @@ ALLOWED_TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
 class TicketService:
     """Ticket operations: create, read, list, status transition."""
 
-    def __init__(self, session: AsyncSession, repo: TicketRepository) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        repo: TicketRepository,
+        arq_pool: Any = None,
+    ) -> None:
         self.session = session
         self.repo = repo
+        self._arq_pool = arq_pool
 
     async def create_ticket(self, req: CreateTicketRequest) -> Ticket:
-        """Create a ticket (status OPEN) and record a CREATED audit event."""
+        """Create a ticket (status OPEN) and record a CREATED audit event.
+
+        After committing, enqueues a background summarization job (best-effort:
+        a Redis failure is logged but does not fail the request).
+        """
         ticket = Ticket(
             customer_name=req.customer_name,
             customer_email=req.customer_email,
@@ -62,6 +77,26 @@ class TicketService:
         # Populate server-generated columns (created_at/updated_at/version_id)
         # on the returned instance, which the 201 response serializes.
         await self.session.refresh(ticket)
+
+        if self._arq_pool is not None:
+            try:
+                job = await self._arq_pool.enqueue_job(
+                    "summarize_ticket",
+                    ticket.id,
+                    _job_id=f"summarize-{ticket.id}",
+                )
+                if job is None:
+                    logger.info(
+                        "summarize_ticket already enqueued for ticket %d (deduped)",
+                        ticket.id,
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to enqueue summarization for ticket %d",
+                    ticket.id,
+                    exc_info=True,
+                )
+
         return ticket
 
     async def get_ticket(self, ticket_id: int) -> Ticket:

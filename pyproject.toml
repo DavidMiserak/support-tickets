@@ -38,6 +38,9 @@ module = [
     "pytest_asyncio",
     "httpx",
     "httpx.*",
+    "arq.*",
+    "transformers.*",
+    "torch.*",
 ]
 ignore_missing_imports = true
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.arq_pool import get_arq_pool
 from app.database import get_session
 from app.enums import Category, Priority, TicketStatus
 from app.repositories.ticket import TicketRepository
@@ -30,9 +31,10 @@ _UNPROCESSABLE: dict[int | str, dict[str, Any]] = {
 
 async def get_ticket_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    arq_pool: Annotated[Any, Depends(get_arq_pool)] = None,
 ) -> TicketService:
     """Build the ticket service for a request (route -> service -> repo)."""
-    return TicketService(session, TicketRepository(session))
+    return TicketService(session, TicketRepository(session), arq_pool)
 
 
 ServiceDep = Annotated[TicketService, Depends(get_ticket_service)]
