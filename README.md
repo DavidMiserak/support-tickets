@@ -117,6 +117,7 @@ Every error returns a uniform envelope, `{"detail": ..., "error_type": ...}`
 | `ticket_not_found`           | 404  | No ticket with that id                            |
 | `invalid_status_transition`  | 409  | Status move not allowed (e.g. out of `CLOSED`)    |
 | `concurrent_update`          | 409  | Another request modified the ticket first (retry) |
+| `internal_server_error`      | 500  | Unexpected server failure (details not exposed)     |
 
 ## Testing
 

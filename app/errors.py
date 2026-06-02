@@ -65,3 +65,8 @@ class TicketValidationError(TicketError):
 
     error_type = "validation_error"
     status_code = 422
+
+
+# Catch-all envelope for unexpected failures (see app.main unhandled handler).
+INTERNAL_SERVER_ERROR_DETAIL = "internal server error"
+INTERNAL_SERVER_ERROR_TYPE = "internal_server_error"
