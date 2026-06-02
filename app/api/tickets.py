@@ -52,14 +52,22 @@ async def create_ticket(
     return TicketResponse.model_validate(ticket)
 
 
-@router.get("/{ticket_id}", response_model=TicketResponse, responses=_NOT_FOUND)
+@router.get(
+    "/{ticket_id}",
+    response_model=TicketResponse,
+    responses={**_NOT_FOUND, **_UNPROCESSABLE},
+)
 async def get_ticket(ticket_id: int, service: ServiceDep) -> TicketResponse:
     """Fetch a single ticket by id."""
     ticket = await service.get_ticket(ticket_id)
     return TicketResponse.model_validate(ticket)
 
 
-@router.get("", response_model=ListTicketsResponse)
+@router.get(
+    "",
+    response_model=ListTicketsResponse,
+    responses=_UNPROCESSABLE,
+)
 async def list_tickets(
     service: ServiceDep,
     status: TicketStatus | None = None,
@@ -83,7 +91,7 @@ async def list_tickets(
 @router.patch(
     "/{ticket_id}/status",
     response_model=TicketResponse,
-    responses={**_NOT_FOUND, **_CONFLICT},
+    responses={**_NOT_FOUND, **_CONFLICT, **_UNPROCESSABLE},
 )
 async def update_status(
     ticket_id: int, req: UpdateStatusRequest, service: ServiceDep
