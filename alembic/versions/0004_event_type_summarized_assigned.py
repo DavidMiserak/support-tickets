@@ -28,7 +28,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Restore the original three-value CHECK constraint."""
+    """Restore the original three-value CHECK constraint.
+
+    Rows carrying ASSIGNED or SUMMARIZED event types are deleted first —
+    they cannot satisfy the narrower constraint and have no valid downgrade value.
+    """
+    op.execute(
+        "DELETE FROM ticket_events " "WHERE event_type IN ('ASSIGNED', 'SUMMARIZED')"
+    )
     op.execute("ALTER TABLE ticket_events DROP CONSTRAINT ck_ticket_events_event_type")
     op.execute(
         "ALTER TABLE ticket_events ADD CONSTRAINT ck_ticket_events_event_type "

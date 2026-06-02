@@ -7,6 +7,9 @@ UVICORN := .venv/bin/uvicorn
 # Container runtime: autodetect podman, else docker. Override with RUNTIME=...
 RUNTIME ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE := $(RUNTIME) compose
+# Podman uses Buildah as its build backend. Docker format is required for
+# HEALTHCHECK support; OCI format (Buildah's default) silently drops it.
+export BUILDAH_FORMAT ?= docker
 SONAR_SCANNER ?= sonar-scanner
 
 # Local tests use an isolated DB to avoid colliding with the app DB.
