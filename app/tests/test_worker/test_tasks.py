@@ -171,3 +171,34 @@ async def test_summarize_ticket_skips_on_pipeline_value_error(
         )
     )
     assert result.scalar_one_or_none() is None
+
+
+async def test_summarize_ticket_skips_when_ticket_deleted_before_write(
+    ticket, test_db, worker_ctx
+):
+    """Ticket deleted after read but before event write is a silent no-op."""
+    from sqlalchemy import delete
+
+    session_factory = worker_ctx["session_factory"]
+    ticket_id = ticket.id
+
+    class DeletingSummarizer:
+        async def summarize(self, text: str) -> str:
+            async with session_factory() as session:
+                await session.execute(delete(Ticket).where(Ticket.id == ticket_id))
+                await session.commit()
+            return "summary after delete"
+
+    ctx = {**worker_ctx, "summarizer": DeletingSummarizer()}
+
+    await summarize_ticket(ctx, ticket_id)  # must not raise
+
+    gone = await test_db.execute(select(Ticket).where(Ticket.id == ticket_id))
+    assert gone.scalar_one_or_none() is None
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket_id,
+            TicketEvent.event_type == EventType.SUMMARIZED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
