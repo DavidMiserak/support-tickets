@@ -147,6 +147,22 @@ When Redis and the worker are running, creating a ticket enqueues a
 There is no re-summarize endpoint yet; a failed or skipped job is not
 backfilled unless you add that explicitly later.
 
+### Connection budget
+
+Each Python process (API **and** worker) creates its own SQLAlchemy pool
+(`app/database.py`: `pool_size=20`, `max_overflow=10` → up to **30**
+connections per process). The default Compose stack runs **two** processes, so
+plan for roughly **60** concurrent Postgres connections under burst load.
+
+PostgreSQL’s default `max_connections` is **100**, which leaves modest headroom
+for admin sessions and migration tooling. Before scaling out — multiple uvicorn
+workers, several worker replicas, or other services on the same database —
+either lower per-process pool settings or raise `max_connections` in Postgres.
+
+The worker holds at most `max_jobs=10` concurrent arq tasks; each
+`summarize_ticket` job uses two short DB sessions (read ticket, then write
+event), so jobs do not hold a connection open during CPU-bound summarization.
+
 ### Transformer summarizer (optional)
 
 The default stack uses `noop` so containers start without ML dependencies.

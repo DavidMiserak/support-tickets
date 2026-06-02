@@ -59,7 +59,7 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 
 - **AnthropicSummarizer** — Phase 4. Plugs into `_BACKENDS` dict + `SUMMARIZER_BACKEND=anthropic`.
 - **Summary inline in GET /tickets/{id}** — Open question; requires join on ticket_events.
-- **Connection math documentation** — pool_size=20+10 × 2 processes = 60 connections; document ceiling before multi-worker deploy.
+- **Connection math documentation** — ~~pool_size=20+10 × 2 processes = 60 connections; document ceiling before multi-worker deploy.~~ Done: README “Connection budget”.
 - **`async_session` → `async_session_factory` rename** — standalone PR, not bundled with Phase 3 worker. Do it separately with grep to catch all call sites.
 
 ## Data model / scale (note now, fix when relevant)
@@ -67,7 +67,7 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] ~~**Native PG ENUM vs VARCHAR+CHECK.**~~ Resolved (autoplan): new `event_type` uses VARCHAR+CHECK (Phase 2a). Existing native enums (`TicketStatus`/`Priority`/`Category`) stay as documented known-debt — revisit only if an `ALTER TYPE` becomes painful.
 - [x] ~~**`assigned_agent_id` has no `ON DELETE` rule.**~~ Resolved: `SET NULL` on both agent FKs (Phase 2a).
 - [x] ~~**Concurrent updates / optimistic locking.**~~ Pulled into Phase 2b (version/`updated_at` guard + concurrent test).
-- [ ] **Connection math.** `pool_size=20 + max_overflow=10` = 30/process vs Postgres default `max_connections=100`. Document the ceiling before running API + worker + multiple uvicorn workers.
+- [ ] **Connection math.** ~~`pool_size=20 + max_overflow=10` = 30/process vs Postgres default `max_connections=100`. Document the ceiling before running API + worker + multiple uvicorn workers.~~ Documented in README “Connection budget”.
 
 ## DX / tooling fixes
 
