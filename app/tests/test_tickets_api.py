@@ -115,3 +115,27 @@ async def test_status_same_value_is_idempotent_200(async_client):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "OPEN"
+
+
+@pytest.mark.asyncio
+async def test_create_ticket_returns_201_when_enqueue_fails(
+    async_client, stub_arq_pool
+):
+    """Redis failure during enqueue must not fail the ticket creation."""
+    stub_arq_pool.enqueue_job.side_effect = ConnectionError("redis down")
+    body = await _create(async_client)
+    assert body["id"] is not None
+    assert body["status"] == "OPEN"
+
+
+@pytest.mark.asyncio
+async def test_create_ticket_logs_when_enqueue_deduped(
+    async_client, stub_arq_pool, caplog
+):
+    """When arq deduplicates a job (returns None), a log line is emitted."""
+    import logging
+
+    stub_arq_pool.enqueue_job.return_value = None
+    with caplog.at_level(logging.INFO, logger="app.services.ticket"):
+        await _create(async_client)
+    assert "deduped" in caplog.text

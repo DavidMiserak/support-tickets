@@ -1,6 +1,7 @@
 # requirements.txt
 
 alembic==1.18.4
+arq==0.26.1
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0
