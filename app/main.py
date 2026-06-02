@@ -1,12 +1,20 @@
 """FastAPI application."""
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.api import tickets
-from app.errors import TicketError
+from app.errors import (
+    INTERNAL_SERVER_ERROR_DETAIL,
+    INTERNAL_SERVER_ERROR_TYPE,
+    TicketError,
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Support Ticket Management System",
@@ -45,6 +53,25 @@ async def validation_error_handler(
             "detail": "request validation failed",
             "error_type": "validation_error",
             "errors": jsonable_encoder(exc.errors()),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(
+    request: Request, _exc: Exception
+) -> JSONResponse:
+    """Return a safe uniform envelope for unexpected errors.
+
+    Domain and validation handlers take precedence via the exception MRO; this
+    covers everything else (500) without leaking stack traces or internals.
+    """
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": INTERNAL_SERVER_ERROR_DETAIL,
+            "error_type": INTERNAL_SERVER_ERROR_TYPE,
         },
     )
 
