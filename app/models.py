@@ -6,7 +6,7 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.enums import Category, Priority, TicketStatus
+from app.enums import Category, EventType, Priority, TicketStatus
 
 
 class Ticket(Base):
@@ -29,7 +29,7 @@ class Ticket(Base):
     category: Mapped[Category] = mapped_column(Enum(Category), nullable=False)
 
     assigned_agent_id: Mapped[int | None] = mapped_column(
-        ForeignKey("agents.id"), nullable=True
+        ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -42,7 +42,9 @@ class Ticket(Base):
         nullable=False,
     )
 
-    events: Mapped[list["TicketEvent"]] = relationship(back_populates="ticket")
+    events: Mapped[list["TicketEvent"]] = relationship(
+        back_populates="ticket", lazy="raise"
+    )
 
     __table_args__ = (Index("idx_status_created", status, created_at.desc()),)
 
@@ -56,9 +58,27 @@ class TicketEvent(Base):
     ticket_id: Mapped[int] = mapped_column(
         ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
     )
-    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Stored as VARCHAR + CHECK (native_enum=False) rather than a native PG enum,
+    # so new event types can be added with a plain migration.
+    event_type: Mapped[EventType] = mapped_column(
+        Enum(
+            EventType,
+            native_enum=False,
+            length=50,
+            create_constraint=True,
+            name="ck_ticket_events_event_type",
+        ),
+        nullable=False,
+    )
+    # Which ticket field this event describes (e.g. "status"); null for CREATED.
+    field_changed: Mapped[str | None] = mapped_column(String(50))
     previous_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
+    # Agent who performed the action; null for system/customer-driven events.
+    # SET NULL keeps the audit row when the agent is deleted.
+    actor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

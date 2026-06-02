@@ -21,8 +21,16 @@ TEST_DATABASE_URL = os.getenv(
 
 
 @pytest.fixture(autouse=True)
-async def setup_test_db() -> AsyncGenerator[None, None]:
-    """Create the schema before each test, drop it after for clean isolation."""
+async def setup_test_db(request: pytest.FixtureRequest) -> AsyncGenerator[None, None]:
+    """Create the schema before each test, drop it after for clean isolation.
+
+    Tests marked ``no_auto_schema`` manage their own schema (e.g. Alembic
+    migration tests) and opt out of this fixture.
+    """
+    if request.node.get_closest_marker("no_auto_schema") is not None:
+        yield
+        return
+
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 
     async with engine.begin() as conn:

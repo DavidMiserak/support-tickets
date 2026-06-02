@@ -19,7 +19,10 @@ class InvalidStatusTransitionError(TicketError):
     pass
 
 
-class ValidationError(TicketError):
-    """Validation failed."""
+class TicketValidationError(TicketError):
+    """Validation failed.
+
+    Named to avoid shadowing Pydantic's ``ValidationError``.
+    """
 
     pass
