@@ -45,6 +45,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["app/tests"]
 addopts = "-q"
+markers = [
+    "no_auto_schema: skip the autouse create_all/drop_all fixture (test manages its own schema, e.g. via Alembic)",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv", "venv", "build", "dist"]
