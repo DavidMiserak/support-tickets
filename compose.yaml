@@ -33,7 +33,9 @@ services:
             context: .
             dockerfile: Containerfile
         # Runs the arq background worker. Picks up jobs enqueued by the API.
-        command: python -m arq app.worker.main.WorkerSettings
+        # Run migrations before arq so SUMMARIZED CHECK exists even if the API
+        # container is still starting (both depend on db healthy in parallel).
+        command: sh -c "alembic upgrade head && python -m arq app.worker.main.WorkerSettings"
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379

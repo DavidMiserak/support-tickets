@@ -31,7 +31,7 @@ _UNPROCESSABLE: dict[int | str, dict[str, Any]] = {
 
 async def get_ticket_service(
     session: Annotated[AsyncSession, Depends(get_session)],
-    arq_pool: Annotated[Any, Depends(get_arq_pool)] = None,
+    arq_pool: Annotated[Any | None, Depends(get_arq_pool)],
 ) -> TicketService:
     """Build the ticket service for a request (route -> service -> repo)."""
     return TicketService(session, TicketRepository(session), arq_pool)
