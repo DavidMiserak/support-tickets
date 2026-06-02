@@ -1,0 +1,117 @@
+"""API integration tests for /tickets."""
+
+import pytest
+from httpx import AsyncClient
+
+VALID_TICKET = {
+    "customer_name": "Ada Lovelace",
+    "customer_email": "ada@example.com",
+    "subject": "Cannot reset password",
+    "description": "The reset link 404s.",
+    "category": "TECHNICAL",
+}
+
+
+async def _create(async_client: AsyncClient, **overrides: object) -> dict[str, object]:
+    payload = {**VALID_TICKET, **overrides}
+    resp = await async_client.post("/tickets", json=payload)
+    assert resp.status_code == 201, resp.text
+    data: dict[str, object] = resp.json()
+    return data
+
+
+@pytest.mark.asyncio
+async def test_create_returns_201_with_populated_timestamps(async_client):
+    body = await _create(async_client)
+    assert body["id"] is not None
+    assert body["status"] == "OPEN"
+    # Server-default timestamps are present in the response (no 500).
+    assert body["created_at"] is not None
+    assert body["updated_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_create_accepts_case_insensitive_enums(async_client):
+    body = await _create(async_client, category="technical", priority="high")
+    assert body["category"] == "TECHNICAL"
+    assert body["priority"] == "HIGH"
+
+
+@pytest.mark.asyncio
+async def test_create_oversized_description_returns_normalized_422(async_client):
+    resp = await async_client.post(
+        "/tickets", json={**VALID_TICKET, "description": "x" * 20_001}
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_type"] == "validation_error"
+    assert body["detail"] == "request validation failed"
+    assert "errors" in body  # per-field detail preserved
+
+
+@pytest.mark.asyncio
+async def test_get_missing_ticket_returns_404_envelope(async_client):
+    resp = await async_client.get("/tickets/999999")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body == {
+        "detail": "ticket 999999 not found",
+        "error_type": "ticket_not_found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_existing_ticket(async_client):
+    created = await _create(async_client)
+    resp = await async_client.get(f"/tickets/{created['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == created["id"]
+
+
+@pytest.mark.asyncio
+async def test_list_filters_and_pagination(async_client):
+    for _ in range(3):
+        await _create(async_client)
+    resp = await async_client.get("/tickets", params={"status": "OPEN", "limit": 2})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+    assert body["skip"] == 0 and body["limit"] == 2
+
+
+@pytest.mark.asyncio
+async def test_list_rejects_out_of_range_limit(async_client):
+    resp = await async_client.get("/tickets", params={"limit": 0})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_status_transition_legal(async_client):
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "IN_PROGRESS"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "IN_PROGRESS"
+
+
+@pytest.mark.asyncio
+async def test_status_transition_illegal_returns_409(async_client):
+    created = await _create(async_client)
+    # OPEN -> RESOLVED is not allowed.
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "RESOLVED"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error_type"] == "invalid_status_transition"
+
+
+@pytest.mark.asyncio
+async def test_status_same_value_is_idempotent_200(async_client):
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "OPEN"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "OPEN"

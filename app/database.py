@@ -31,6 +31,14 @@ class Base(DeclarativeBase):
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency: get a database session."""
+    """Dependency: get a database session.
+
+    Rolls back on any exception escaping the request so a half-applied unit of
+    work never lingers on the pooled connection. Services own their own commits.
+    """
     async with async_session() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
