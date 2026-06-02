@@ -30,8 +30,8 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
     summarizer = ctx["summarizer"]
     session_factory = ctx["session_factory"]
 
-    # Fetch and summarize before opening a DB session — keeps the connection
-    # free during CPU-bound inference (avoids pool exhaustion under load).
+    # Read the ticket in a short-lived session, then release the connection
+    # before CPU-bound inference. The write session opens only after summarize.
     async with session_factory() as session:
         ticket = await session.get(Ticket, ticket_id)
 
