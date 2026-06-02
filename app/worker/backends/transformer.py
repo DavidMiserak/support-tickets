@@ -30,7 +30,7 @@ class TransformerSummarizer:
         except ImportError:
             logger.warning(
                 "TransformerSummarizer unavailable: torch or transformers not installed. "
-                "Check that both are in requirements.txt."
+                "Install optional deps with: pip install -r requirements-ml.txt"
             )
             return False
 

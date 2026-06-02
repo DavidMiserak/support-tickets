@@ -34,8 +34,8 @@ services:
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379
-            # Default: noop (no model download). Set to "transformer" to enable
-            # DistilBART summarization (first run downloads ~300 MB from HuggingFace).
+            # Default: noop (no model download). For transformer, extend the image
+            # with requirements-ml.txt and set SUMMARIZER_BACKEND=transformer.
             SUMMARIZER_BACKEND: noop
         depends_on:
             db:

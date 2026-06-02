@@ -19,6 +19,7 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
     Part of the summarize-at-create, best-effort-once policy: the API enqueues
     one job per ticket at creation (deduped by job id); this task runs at most
     once per enqueue with max_tries=1 and no automatic retry on failure.
+    Multiple SUMMARIZED audit rows per ticket are allowed (e.g. manual re-enqueue).
 
     The summarizer and session factory are injected via arq's ``ctx`` dict so
     tests can supply stubs without touching global state.

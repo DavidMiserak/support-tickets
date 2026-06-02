@@ -1,0 +1,15 @@
+# requirements-ml.txt
+#
+# Optional dependencies for SUMMARIZER_BACKEND=transformer (DistilBART via
+# HuggingFace). Not installed in the default API or worker container images;
+# install locally for ML development or extend the worker image (see README).
+#
+# First run downloads ~300 MB of model weights to the HuggingFace cache.
+#
+# CPU-only PyTorch wheels (worker uses device=-1). Drop the extra-index line
+# if you install a CUDA build intentionally.
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+
+torch==2.10.0
+transformers==4.57.6
