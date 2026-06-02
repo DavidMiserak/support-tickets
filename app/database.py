@@ -19,7 +19,7 @@ engine = create_async_engine(
     pool_recycle=3600,
 )
 
-async_session = async_sessionmaker(
+async_session_factory = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
@@ -36,7 +36,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     Rolls back on any exception escaping the request so a half-applied unit of
     work never lingers on the pooled connection. Services own their own commits.
     """
-    async with async_session() as session:
+    async with async_session_factory() as session:
         try:
             yield session
         except Exception:
