@@ -143,6 +143,28 @@ async def _assert_schema_semantics() -> None:
         await conn.close()
 
 
+async def _assert_0004_semantics(ticket_id: int) -> None:
+    """Assert migration 0004 extended the CHECK to accept SUMMARIZED and ASSIGNED."""
+    conn = await asyncpg.connect(_DSN)
+    try:
+        # Both new values must be accepted.
+        for ev in ("SUMMARIZED", "ASSIGNED"):
+            await conn.execute(
+                "INSERT INTO ticket_events (ticket_id, event_type) VALUES ($1, $2)",
+                ticket_id,
+                ev,
+            )
+        # A value outside the extended set must still be rejected.
+        with pytest.raises(asyncpg.exceptions.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO ticket_events (ticket_id, event_type) VALUES ($1, $2)",
+                ticket_id,
+                "DELETED",
+            )
+    finally:
+        await conn.close()
+
+
 @pytest.mark.no_auto_schema
 def test_migrations_upgrade_then_downgrade() -> None:
     """`upgrade head` then `downgrade base` both succeed on a clean database."""
@@ -158,8 +180,30 @@ def test_migrations_upgrade_then_downgrade() -> None:
         assert _run(_column_exists("ticket_events", "field_changed"))
         assert _run(_table_exists("tickets"))
 
-        # The migration's CHECK + ON DELETE SET NULL actually enforce.
+        # The migration's CHECK + ON DELETE SET NULL actually enforce (0002 semantics).
         _run(_assert_schema_semantics())
+
+        # Seed a ticket_id visible to the 0004 assertion helper.
+        async def _seed_ticket_id() -> int:
+            conn = await asyncpg.connect(_DSN)
+            try:
+                row_id = await conn.fetchval(
+                    "INSERT INTO tickets (customer_name, customer_email, subject, "
+                    "description, category) VALUES ($1,$2,$3,$4,$5::category) RETURNING id",
+                    "T",
+                    "t@t.com",
+                    "S",
+                    "D",
+                    "OTHER",
+                )
+                return int(row_id)
+            finally:
+                await conn.close()
+
+        tid = _run(_seed_ticket_id())
+
+        # 0004 extended the CHECK to include SUMMARIZED and ASSIGNED.
+        _run(_assert_0004_semantics(tid))
 
         _alembic("downgrade", "base")
 
