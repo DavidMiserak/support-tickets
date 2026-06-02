@@ -16,6 +16,10 @@ _MIN_SUMMARY_WORDS = 5
 async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
     """Summarize a ticket's description and store the result as an audit event.
 
+    Part of the summarize-at-create, best-effort-once policy: the API enqueues
+    one job per ticket at creation (deduped by job id); this task runs at most
+    once per enqueue with max_tries=1 and no automatic retry on failure.
+
     The summarizer and session factory are injected via arq's ``ctx`` dict so
     tests can supply stubs without touching global state.
 

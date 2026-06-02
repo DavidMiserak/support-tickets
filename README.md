@@ -5,8 +5,9 @@ processing. Built with FastAPI, PostgreSQL, and SQLAlchemy (async).
 
 > **Status:** active development. The ticket CRUD API is in place — create,
 > retrieve, list (filter + paginate), and validated status transitions with a
-> transactional audit trail and optimistic locking. The background worker is
-> next (see [Roadmap](#roadmap)).
+> transactional audit trail and optimistic locking. Background summarization
+> runs summarize-at-create, best-effort once via arq when Redis and the worker
+> are up (see [Background summarization](#background-summarization)).
 
 ## Overview
 
@@ -119,6 +120,21 @@ Every error returns a uniform envelope, `{"detail": ..., "error_type": ...}`
 | `concurrent_update`          | 409  | Another request modified the ticket first (retry) |
 | `internal_server_error`      | 500  | Unexpected server failure (details not exposed)     |
 
+### Background summarization
+
+When Redis and the worker are running, creating a ticket enqueues a
+**summarize-at-create, best-effort once** job:
+
+- One job per ticket, deduped by id at enqueue time (`_job_id`)
+- Ticket creation succeeds even if Redis is down or enqueue fails
+- The worker runs the job at most once (`max_tries=1`); failures are logged
+  and not retried automatically
+- With `SUMMARIZER_BACKEND=noop` (the compose default), the stored summary
+  equals the ticket description unchanged
+
+There is no re-summarize endpoint yet; a failed or skipped job is not
+backfilled unless you add that explicitly later.
+
 ## Testing
 
 ```bash
@@ -143,8 +159,10 @@ make clean        # remove caches and build artifacts
 - [x] Project foundation: models, migrations, config, `/health`
 - [x] Ticket CRUD API (create, retrieve, list with pagination/filtering)
 - [x] Status transition validation (state machine + optimistic locking)
+- [x] Background worker — summarize-at-create, best-effort once
+  (arq + pluggable backends)
 - [ ] Assign-agent endpoint + seed data script
-- [ ] Background worker (summary, priority, routing) via Redis queue
+- [ ] Additional worker tasks (priority, routing)
 - [ ] Structured logging and metrics
 
 ## License

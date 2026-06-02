@@ -51,8 +51,8 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] **`stub_arq_pool` fixture** — `autouse=False`, no `app` param (use module-level import). `conftest.py` teardown uses `.pop(get_arq_pool, None)` not `.clear()`.
 - [x] **`settings.redis_url`** — add to `app/config.py` before introducing worker code.
 - [x] **Docker model pre-download** — default `SUMMARIZER_BACKEND=noop` in compose.yaml worker service.
-- [x] **`_job_id` dedup** — log when `enqueue_job` returns None (already deduped).
-- [x] **max_tries=1** — best-effort; `@arq.func(max_tries=1)` on `summarize_ticket`.
+- [x] **`_job_id` dedup** — summarize-at-create, best-effort once; log when `enqueue_job` returns None (already deduped).
+- [x] **max_tries=1** — no automatic retry on failure; pairs with the one-shot enqueue policy above.
 - [x] **Test gaps to add** — `load_model()` failure, pipeline ValueError, enqueue failure → 201, dedup logging, migration 0004 downgrade.
 
 ## Deferred from Phase 3 review (autoplan 2026-06-02)

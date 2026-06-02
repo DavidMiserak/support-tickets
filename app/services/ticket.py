@@ -54,8 +54,10 @@ class TicketService:
     async def create_ticket(self, req: CreateTicketRequest) -> Ticket:
         """Create a ticket (status OPEN) and record a CREATED audit event.
 
-        After committing, enqueues a background summarization job (best-effort:
-        a Redis failure is logged but does not fail the request).
+        Summarization policy: summarize-at-create, best-effort once. After
+        commit, a single background job is enqueued (deduped by ticket id).
+        Redis or worker failures are logged but do not fail the request, and
+        failed jobs are not retried automatically.
         """
         ticket = Ticket(
             customer_name=req.customer_name,
@@ -80,6 +82,7 @@ class TicketService:
 
         if self._arq_pool is not None:
             try:
+                # summarize-at-create, best-effort once: _job_id dedupes re-enqueue.
                 job = await self._arq_pool.enqueue_job(
                     "summarize_ticket",
                     ticket.id,
