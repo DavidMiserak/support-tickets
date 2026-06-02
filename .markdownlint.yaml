@@ -1,0 +1,7 @@
+default: true
+MD007: false
+# Allow long lines inside tables (rows can't be wrapped).
+MD013:
+  tables: false
+# Long URL values make pipe alignment impractical; same rationale as MD013.
+MD060: false

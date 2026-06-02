@@ -1,0 +1,73 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+exclude = [
+    "^\\.venv/",
+    "^venv/",
+    "^build/",
+    "^dist/",
+]
+
+[[tool.mypy.overrides]]
+module = ["app.tests.*", "tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+
+# Alembic migration scripts: keep strict typing off (generated style).
+[[tool.mypy.overrides]]
+module = ["migrations.*"]
+disallow_untyped_defs = false
+
+# Third-party packages without bundled type stubs (or absent from the mypy
+# hook env): treat as untyped rather than failing on missing imports.
+[[tool.mypy.overrides]]
+module = [
+    "testcontainers.*",
+    "asyncpg.*",
+    "pytest",
+    "pytest_asyncio",
+    "httpx",
+    "httpx.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["app/tests"]
+addopts = "-q"
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "venv", "build", "dist"]
+skips = ["B101"]
+severity = "medium"
+confidence = "medium"
+
+[tool.coverage.run]
+source = ["app"]
+relative_files = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    ".venv/*",
+]
+
+[tool.coverage.paths]
+source = [
+    "app",
+    "/app/app",
+]
+
+[tool.coverage.report]
+show_missing = false
+skip_covered = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
