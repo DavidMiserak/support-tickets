@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport"
     )
     redis_url: str = "redis://redis:6379"
+    summarizer_backend: str = "noop"
     debug: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
