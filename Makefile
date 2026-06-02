@@ -4,8 +4,8 @@ PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
 UVICORN := .venv/bin/uvicorn
 
-# podman is the primary runtime; override with RUNTIME=docker when needed.
-RUNTIME ?= podman
+# Container runtime: autodetect podman, else docker. Override with RUNTIME=...
+RUNTIME ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE := $(RUNTIME) compose
 SONAR_SCANNER ?= sonar-scanner
 
