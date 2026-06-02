@@ -1,4 +1,3 @@
-# Dockerfile
 # Multi-stage build: dependencies are compiled into an isolated virtualenv in
 # the builder stage, then copied into a minimal runtime image that runs as an
 # unprivileged user.

@@ -149,3 +149,26 @@ async def test_summarize_ticket_skips_on_summarizer_error(ticket, test_db, worke
         )
     )
     assert result.scalar_one_or_none() is None
+
+
+async def test_summarize_ticket_skips_on_pipeline_value_error(
+    ticket, test_db, worker_ctx
+):
+    """HuggingFace pipeline ValueError (e.g. sequence too long) is treated as a summarizer error."""
+    from unittest.mock import AsyncMock
+
+    broken_summarizer = AsyncMock()
+    broken_summarizer.summarize.side_effect = ValueError(
+        "sequence length exceeds model max"
+    )
+    ctx = {**worker_ctx, "summarizer": broken_summarizer}
+
+    await summarize_ticket(ctx, ticket.id)  # must not raise
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == EventType.SUMMARIZED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
