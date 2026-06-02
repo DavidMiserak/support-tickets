@@ -42,10 +42,17 @@ class Ticket(Base):
         nullable=False,
     )
 
+    # Optimistic-lock counter. SQLAlchemy adds `WHERE version_id = :old` to every
+    # UPDATE and raises StaleDataError if a concurrent write already bumped it.
+    version_id: Mapped[int] = mapped_column(
+        nullable=False, server_default="1", default=1
+    )
+
     events: Mapped[list["TicketEvent"]] = relationship(
         back_populates="ticket", lazy="raise"
     )
 
+    __mapper_args__ = {"version_id_col": version_id}
     __table_args__ = (Index("idx_status_created", status, created_at.desc()),)
 
 

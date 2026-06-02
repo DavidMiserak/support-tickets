@@ -3,7 +3,24 @@
 from enum import Enum
 
 
-class TicketStatus(str, Enum):
+class CaseInsensitiveStrEnum(str, Enum):
+    """A string enum that accepts any casing on input.
+
+    Lets clients send ``"open"`` or ``"Open"`` for ``OPEN``; values always
+    serialize back in canonical (upper) casing.
+    """
+
+    @classmethod
+    def _missing_(cls, value: object) -> "CaseInsensitiveStrEnum | None":
+        if isinstance(value, str):
+            upper = value.upper()
+            for member in cls:
+                if member.value == upper:
+                    return member
+        return None
+
+
+class TicketStatus(CaseInsensitiveStrEnum):
     """Ticket status lifecycle."""
 
     OPEN = "OPEN"
@@ -12,7 +29,7 @@ class TicketStatus(str, Enum):
     CLOSED = "CLOSED"
 
 
-class Priority(str, Enum):
+class Priority(CaseInsensitiveStrEnum):
     """Ticket priority levels."""
 
     LOW = "LOW"
@@ -21,7 +38,7 @@ class Priority(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class Category(str, Enum):
+class Category(CaseInsensitiveStrEnum):
     """Ticket categories."""
 
     BILLING = "BILLING"
