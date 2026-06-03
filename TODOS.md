@@ -101,6 +101,25 @@ Deferred from Phase 4 (not an observability concept — ships as standalone PR).
 - [ ] `ANTHROPIC_API_KEY: str | None` in `Settings`
 - [ ] `requirements-optional.txt` for `anthropic` dep (mirrors `requirements-ml.txt`)
 
+## Phase 5 — Observability hardening (deferred from Phase 4 review)
+
+- [ ] **`/health` Redis-degraded-to-503 causes container restart loop.** Current:
+  `all_ok = db_ok and redis_ok`; any Redis disruption returns 503 and the Docker
+  HEALTHCHECK restarts the container even though Redis is optional for serving
+  requests. Fix: either (a) decouple `/health` liveness from Redis and add a
+  separate `/ready` readiness probe that includes Redis, or (b) add
+  `--health-retries=5` and a longer `--health-interval` to the compose
+  HEALTHCHECK so a brief Redis blip doesn't trigger a restart. (Found by
+  adversarial review on feat/observability-4b.)
+- [ ] **X-Request-ID format inconsistency.** Server-generated IDs use `uuid4().hex`
+  (32-char, no hyphens); client-supplied IDs are echoed verbatim in hyphenated
+  form. Log aggregators correlating on `request_id` may see two formats. Fix:
+  add `generator=lambda: str(uuid4())` to `CorrelationIdMiddleware` to produce
+  hyphenated UUIDs consistently.
+- [ ] **`/health` and `/metrics` have no timeouts on DB/Redis probes.** A
+  half-open TCP connection to Postgres or Redis hangs `/health` indefinitely.
+  Wrap probes with `asyncio.wait_for(..., timeout=2.0)`.
+
 ## Roadmap (from design doc)
 
 - [x] Phase 1 — foundation: models, migrations, config, `/health`

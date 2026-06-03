@@ -100,8 +100,15 @@ def test_setup_logging_accepts_valid_levels(level: str) -> None:
     """setup_logging resolves standard level names, case-insensitively."""
     from app.logging_config import setup_logging
 
-    setup_logging(level)
-    assert logging.getLogger().level == logging._nameToLevel[level.strip().upper()]
+    root = logging.getLogger()
+    prior_handlers = root.handlers[:]
+    prior_level = root.level
+    try:
+        setup_logging(level)
+        assert root.level == logging._nameToLevel[level.strip().upper()]
+    finally:
+        root.handlers = prior_handlers
+        root.setLevel(prior_level)
 
 
 def test_setup_logging_idempotent() -> None:
