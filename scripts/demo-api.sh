@@ -3,7 +3,6 @@
 #
 # Usage:
 #   make run          # api + postgres + redis + worker
-#   make review       # alias for make demo-api
 #   make demo-api     # or: ./scripts/demo-api.sh
 #
 # Options (environment):
@@ -489,10 +488,6 @@ main() {
 
   need_cmd curl jq
   DEMO_TICKET_ID=""
-
-  phase_sep
-  info "Review path: Phase A (ticket API) → B (OpenAPI + errors) → C (async worker)"
-  phase_sep
 
   check_api_up
   maybe_seed_agents
