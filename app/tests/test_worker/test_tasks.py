@@ -325,6 +325,28 @@ async def test_assign_priority_upgrades_on_high_keyword(worker_ctx, test_db):
     assert t.priority == Priority.HIGH
 
 
+async def test_assign_priority_ignores_substring_false_positives(worker_ctx, test_db):
+    """Word-boundary matching: 'download' must not match the 'down' critical keyword."""
+    t = await _make_ticket(
+        test_db,
+        subject="Cannot download my invoice PDF",
+        description="The download link in markdown docs is broken.",
+        priority="MEDIUM",
+    )
+    await assign_priority(worker_ctx, t.id)
+
+    await test_db.refresh(t)
+    assert t.priority == Priority.MEDIUM
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == t.id,
+            TicketEvent.event_type == EventType.PRIORITY_CHANGED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
+
+
 async def test_assign_priority_does_not_downgrade(worker_ctx, test_db):
     """Ticket already at CRITICAL is not downgraded by a MEDIUM heuristic result."""
     t = await _make_ticket(test_db, description="Normal question.", priority="CRITICAL")

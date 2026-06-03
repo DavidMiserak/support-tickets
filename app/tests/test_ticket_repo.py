@@ -2,9 +2,10 @@
 
 import pytest
 
-from app.enums import Category, Priority, TicketStatus
-from app.models import Ticket
+from app.enums import Category, EventType, Priority, TicketStatus
+from app.models import Ticket, TicketEvent
 from app.repositories.ticket import TicketRepository
+from app.schemas import MAX_TICKET_EVENTS_ON_DETAIL
 
 
 def _ticket(**overrides: object) -> Ticket:
@@ -77,3 +78,29 @@ async def test_list_pagination_is_stable_across_pages(test_db):
     past_end, total = await repo.list(skip=100, limit=10)
     assert past_end == []
     assert total == 5
+
+
+@pytest.mark.asyncio
+async def test_get_with_events_bounds_and_reports_total(test_db):
+    repo = TicketRepository(test_db)
+    ticket = await repo.add(_ticket())
+    for i in range(MAX_TICKET_EVENTS_ON_DETAIL + 5):
+        repo.add_event(
+            TicketEvent(
+                ticket_id=ticket.id,
+                event_type=EventType.STATUS_CHANGED,
+                field_changed="status",
+                previous_value="OPEN",
+                new_value="IN_PROGRESS",
+            )
+        )
+    await test_db.commit()
+
+    loaded, events, total = await repo.get_with_events(
+        ticket.id, event_limit=MAX_TICKET_EVENTS_ON_DETAIL
+    )
+    assert loaded is not None
+    assert total == MAX_TICKET_EVENTS_ON_DETAIL + 5
+    assert len(events) == MAX_TICKET_EVENTS_ON_DETAIL
+    timestamps = [e.created_at for e in events]
+    assert timestamps == sorted(timestamps)

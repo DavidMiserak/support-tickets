@@ -10,6 +10,8 @@ from app.enums import Category, EventType, Priority, TicketStatus
 # Generous upper bound so a client can't POST a multi-MB body into the
 # unbounded Text column, while still allowing long descriptions.
 MAX_DESCRIPTION_LENGTH = 20_000
+# Cap audit events on GET /tickets/{id} to keep payloads bounded.
+MAX_TICKET_EVENTS_ON_DETAIL = 100
 
 
 class CreateTicketRequest(BaseModel):
@@ -89,14 +91,18 @@ class TicketResponse(BaseModel):
 
 
 class TicketDetailResponse(TicketResponse):
-    """Ticket detail response — includes the full audit event history.
+    """Ticket detail response — includes a bounded audit event history.
 
     Used by GET /tickets/{id}. Events are ordered by created_at ascending so
     the CREATED event is always first and worker-written events follow in order.
+    At most MAX_TICKET_EVENTS_ON_DETAIL events are returned (most recent when
+    truncated); events_truncated is true and events_total reports the full count.
     Not included in list responses to avoid N+1 queries on the collection.
     """
 
     events: list[TicketEventResponse] = []
+    events_total: int = 0
+    events_truncated: bool = False
 
 
 class ListTicketsResponse(BaseModel):
