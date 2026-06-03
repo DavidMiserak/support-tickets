@@ -121,10 +121,16 @@ async def async_client(
 async def worker_ctx(test_db: AsyncSession) -> AsyncGenerator[dict[str, object], None]:
     """arq-style context dict for calling worker tasks directly in tests.
 
-    Injects a NoopSummarizer and a session factory that uses the test DB,
-    so tasks can be unit-tested without Redis or a real worker process.
+    Injects a NoopSummarizer, the default (rules) classifiers, and a session
+    factory that uses the test DB, so tasks can be unit-tested without Redis or
+    a real worker process.
     """
     from app.worker.backends.noop import NoopSummarizer
+    from app.worker.backends.rules_classifier import (
+        RulesPriorityClassifier,
+        RulesRoutingClassifier,
+        RulesSpamClassifier,
+    )
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     test_session_factory = async_sessionmaker(
@@ -133,6 +139,9 @@ async def worker_ctx(test_db: AsyncSession) -> AsyncGenerator[dict[str, object],
 
     yield {
         "summarizer": NoopSummarizer(),
+        "priority_classifier": RulesPriorityClassifier(),
+        "spam_classifier": RulesSpamClassifier(),
+        "routing_classifier": RulesRoutingClassifier(),
         "session_factory": test_session_factory,
     }
 

@@ -1,7 +1,6 @@
 """arq task definitions for the background worker."""
 
 import logging
-import re
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -12,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.enums import Category, EventType, Priority
+from app.enums import EventType, Priority
 from app.models import Ticket, TicketEvent
 
 logger = logging.getLogger(__name__)
@@ -171,59 +170,35 @@ _PRIORITY_RANK: dict[Priority, int] = {
     Priority.CRITICAL: 3,
 }
 
-_CRITICAL_KEYWORDS = (
-    "outage",
-    "down",
-    "critical",
-    "emergency",
-    "urgent",
-    "production",
-)
-_HIGH_KEYWORDS = (
-    "asap",
-    "important",
-    "major",
-    "severe",
-    "degraded",
-    "performance",
-)
-
-# Precompiled word-boundary patterns prevent false positives from substrings:
-# "down" won't match "download"/"markdown"; "production" won't match inside
-# "nonproduction". Patterns are built once at import time.
-_CRITICAL_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(kw) for kw in _CRITICAL_KEYWORDS) + r")\b"
-)
-_HIGH_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(kw) for kw in _HIGH_KEYWORDS) + r")\b"
-)
-
-
-def _detect_priority(subject: str, description: str) -> Priority:
-    text = (subject + " " + description).lower()
-    if _CRITICAL_RE.search(text):
-        return Priority.CRITICAL
-    if _HIGH_RE.search(text):
-        return Priority.HIGH
-    return Priority.MEDIUM
-
 
 async def assign_priority(
     ctx: dict[str, Any],
     ticket_id: int,
     correlation_id: str | None = None,
 ) -> None:
-    """Upgrade ticket priority based on subject/description keyword heuristics.
+    """Upgrade ticket priority based on the configured priority classifier.
 
     Only upgrades — never downgrades what the customer submitted. If the
-    heuristic suggests a lower or equal priority, the task is a no-op.
+    classifier proposes a lower or equal priority, the task is a no-op.
     Writes a PRIORITY_CHANGED event and updates Ticket.priority on upgrade.
+
+    The classifier (rules or ML) is injected via ``ctx``; a classifier failure
+    is non-fatal — it is logged and the task skips without writing an event.
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "assign_priority") as ctx_:
         if ctx_ is None:
             return
         session, ticket, start = ctx_
-        computed = _detect_priority(ticket.subject, ticket.description)
+        try:
+            computed = await ctx["priority_classifier"].classify_priority(
+                ticket.subject, ticket.description
+            )
+        except Exception:
+            logger.exception(
+                "assign_priority: classifier raised, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
 
         if _PRIORITY_RANK[computed] <= _PRIORITY_RANK[ticket.priority]:
             logger.info(
@@ -271,28 +246,8 @@ async def assign_priority(
 
 
 # ---------------------------------------------------------------------------
-# Spam detection heuristics
+# Spam detection
 # ---------------------------------------------------------------------------
-
-_SPAM_PHRASES = (
-    "click here",
-    "free offer",
-    "you have won",
-    "congratulations",
-    "act now",
-    "limited time",
-    "buy now",
-    "make money",
-)
-_MAX_URLS = 2
-
-
-def _is_spam(subject: str, description: str) -> bool:
-    text = (subject + " " + description).lower()
-    url_count = text.count("http://") + text.count("https://")
-    if url_count > _MAX_URLS:
-        return True
-    return any(phrase in text for phrase in _SPAM_PHRASES)
 
 
 async def detect_spam(
@@ -300,18 +255,27 @@ async def detect_spam(
     ticket_id: int,
     correlation_id: str | None = None,
 ) -> None:
-    """Flag potential spam tickets based on content heuristics.
+    """Flag potential spam tickets using the configured spam classifier.
 
-    Writes a SPAM_FLAGGED event when the ticket content triggers one or more
-    spam signals (known phrases, excessive URLs). No event is written for
-    clean tickets. Ticket status is not changed — a human reviews flagged
-    tickets.
+    Writes a SPAM_FLAGGED event when the classifier flags the content. No event
+    is written for clean tickets. Ticket status is not changed — a human reviews
+    flagged tickets. A classifier failure is non-fatal: it is logged and treated
+    as not-flagged (no event).
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "detect_spam") as ctx_:
         if ctx_ is None:
             return
         session, ticket, start = ctx_
-        flagged = _is_spam(ticket.subject, ticket.description)
+        try:
+            flagged = await ctx["spam_classifier"].classify_spam(
+                ticket.subject, ticket.description
+            )
+        except Exception:
+            logger.exception(
+                "detect_spam: classifier raised, treating as not spam",
+                extra={"ticket_id": ticket_id},
+            )
+            return
 
         if not flagged:
             logger.info("detect_spam: clean", extra={"ticket_id": ticket_id})
@@ -342,15 +306,8 @@ async def detect_spam(
 
 
 # ---------------------------------------------------------------------------
-# Routing heuristics
+# Routing
 # ---------------------------------------------------------------------------
-
-_DEPARTMENT: dict[Category, str] = {
-    Category.BILLING: "billing",
-    Category.TECHNICAL: "technical-support",
-    Category.FEATURE_REQUEST: "product",
-    Category.OTHER: "general",
-}
 
 
 async def route_ticket(
@@ -358,17 +315,27 @@ async def route_ticket(
     ticket_id: int,
     correlation_id: str | None = None,
 ) -> None:
-    """Route a ticket to the appropriate support department based on category.
+    """Route a ticket to a support department using the configured router.
 
-    Writes a ROUTED event recording the destination department. The mapping
-    is deterministic: category → department string. A ROUTED event is always
-    written (every ticket has a category).
+    Writes a ROUTED event recording the destination department. The rules
+    router maps category → department deterministically; the ML router uses the
+    ticket text. A ROUTED event is normally always written; a classifier failure
+    is non-fatal and skips the event.
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "route_ticket") as ctx_:
         if ctx_ is None:
             return
         session, ticket, start = ctx_
-        department = _DEPARTMENT[ticket.category]
+        try:
+            department = await ctx["routing_classifier"].classify_department(
+                ticket.category, ticket.subject, ticket.description
+            )
+        except Exception:
+            logger.exception(
+                "route_ticket: classifier raised, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
 
         try:
             session.add(

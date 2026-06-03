@@ -1,0 +1,27 @@
+# compose.ml.yaml — overlay that runs the worker with ML backends enabled.
+#
+# Builds the worker from the runtime-ml image stage (torch + transformers),
+# switches the worker to the transformer summarizer and zero-shot classifiers,
+# and mounts a named volume for the HuggingFace cache so model weights (~1 GB)
+# download once instead of on every restart.
+#
+# Usage:
+#   make run-ml
+#   # or directly:
+#   podman compose -f compose.yaml -f compose.ml.yaml up --build -d
+#   docker compose -f compose.yaml -f compose.ml.yaml up --build -d
+#
+# Only the worker runs models; the api stays on the lean default image.
+services:
+    worker:
+        build:
+            target: runtime-ml
+        environment:
+            SUMMARIZER_BACKEND: transformer
+            CLASSIFIER_BACKEND: zeroshot
+            # CLASSIFIER_MODEL: facebook/bart-large-mnli  # higher accuracy, ~1.6 GB
+        volumes:
+            - hf_cache:/opt/hf-cache
+
+volumes:
+    hf_cache:

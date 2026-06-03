@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://redis:6379"
     summarizer_backend: str = "noop"
+    classifier_backend: str = "rules"
+    classifier_model: str = "valhalla/distilbart-mnli-12-3"
     log_level: str = "INFO"
     debug: bool = False
     db_pool_size: int = 20

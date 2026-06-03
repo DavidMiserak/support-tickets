@@ -1,5 +1,6 @@
 """Tests for arq worker tasks."""
 
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -377,6 +378,28 @@ async def test_assign_priority_no_op_when_same_level(worker_ctx, test_db):
     assert result.scalars().all() == []
 
 
+async def test_assign_priority_no_op_when_low_without_keywords(worker_ctx, test_db):
+    """Customer-submitted LOW must not be upgraded when no keywords match."""
+    t = await _make_ticket(
+        test_db,
+        subject="Question about my account",
+        description="When will my refund be processed?",
+        priority="LOW",
+    )
+    await assign_priority(worker_ctx, t.id)
+
+    await test_db.refresh(t)
+    assert t.priority == Priority.LOW
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == t.id,
+            TicketEvent.event_type == EventType.PRIORITY_CHANGED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
+
+
 async def test_assign_priority_no_op_when_ticket_missing(worker_ctx, test_db):
     """Missing ticket is silently skipped."""
     await assign_priority(worker_ctx, ticket_id=99999)
@@ -515,3 +538,85 @@ async def test_route_ticket_no_op_when_ticket_missing(worker_ctx, test_db):
         select(TicketEvent).where(TicketEvent.event_type == EventType.ROUTED)
     )
     assert result.scalars().all() == []
+
+
+# ---------------------------------------------------------------------------
+# Classifier wiring — each task must read its classifier from ctx and act on
+# the result, regardless of which backend (rules/ML) is installed. The stubs
+# return values the default rules backend would NOT produce for this ticket
+# (BILLING, MEDIUM, clean text → rules give LOW / not-spam / "billing"), so a
+# matching event proves the injected classifier was used.
+# ---------------------------------------------------------------------------
+
+
+async def test_assign_priority_uses_injected_classifier(ticket, worker_ctx, test_db):
+    """assign_priority calls ctx['priority_classifier'] and applies its result."""
+    clf = AsyncMock()
+    clf.classify_priority.return_value = Priority.CRITICAL
+    ctx = {**worker_ctx, "priority_classifier": clf}
+
+    await assign_priority(ctx, ticket.id)
+
+    clf.classify_priority.assert_awaited_once_with(ticket.subject, ticket.description)
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == EventType.PRIORITY_CHANGED,
+        )
+    )
+    assert result.scalar_one().new_value == "CRITICAL"
+
+
+async def test_detect_spam_uses_injected_classifier(ticket, worker_ctx, test_db):
+    """detect_spam calls ctx['spam_classifier'] and flags on a True result."""
+    clf = AsyncMock()
+    clf.classify_spam.return_value = True
+    ctx = {**worker_ctx, "spam_classifier": clf}
+
+    await detect_spam(ctx, ticket.id)
+
+    clf.classify_spam.assert_awaited_once_with(ticket.subject, ticket.description)
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == EventType.SPAM_FLAGGED,
+        )
+    )
+    assert result.scalar_one().new_value == "true"
+
+
+async def test_route_ticket_uses_injected_classifier(ticket, worker_ctx, test_db):
+    """route_ticket calls ctx['routing_classifier'] (with category) and applies it."""
+    clf = AsyncMock()
+    clf.classify_department.return_value = "product"
+    ctx = {**worker_ctx, "routing_classifier": clf}
+
+    await route_ticket(ctx, ticket.id)
+
+    clf.classify_department.assert_awaited_once_with(
+        ticket.category, ticket.subject, ticket.description
+    )
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == EventType.ROUTED,
+        )
+    )
+    assert result.scalar_one().new_value == "product"
+
+
+async def test_classifier_failure_is_non_fatal(ticket, worker_ctx, test_db):
+    """A classifier exception is logged and skips the event, never crashes the task."""
+    clf = AsyncMock()
+    clf.classify_priority.side_effect = RuntimeError("model boom")
+    ctx = {**worker_ctx, "priority_classifier": clf}
+
+    await assign_priority(ctx, ticket.id)  # must not raise
+
+    result = await test_db.execute(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == EventType.PRIORITY_CHANGED,
+        )
+    )
+    assert result.scalar_one_or_none() is None
