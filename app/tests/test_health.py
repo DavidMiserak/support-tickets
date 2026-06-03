@@ -53,8 +53,7 @@ async def test_health_returns_503_when_redis_unavailable(
     try:
         response = await async_client.get("/health")
     finally:
-        mock_pool = AsyncMock()
-        app.dependency_overrides[get_arq_pool] = lambda: mock_pool
+        app.dependency_overrides.pop(get_arq_pool, None)
 
     assert response.status_code == 503
     data = response.json()
@@ -83,8 +82,7 @@ async def test_health_returns_503_when_redis_ping_fails(
     try:
         response = await async_client.get("/health")
     finally:
-        mock_pool = AsyncMock()
-        app.dependency_overrides[get_arq_pool] = lambda: mock_pool
+        app.dependency_overrides.pop(get_arq_pool, None)
 
     assert response.status_code == 503
     data = response.json()
@@ -127,6 +125,26 @@ async def test_health_generates_request_id_header(
     assert response.status_code == 200
     assert "x-request-id" in response.headers
     assert len(response.headers["x-request-id"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_health_rejects_invalid_request_id(
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-UUID X-Request-ID is rejected; middleware generates a fresh UUID."""
+
+    async def db_ok() -> bool:
+        return True
+
+    monkeypatch.setattr("app.main.check_database_connection", db_ok)
+
+    response = await async_client.get("/health", headers={"X-Request-ID": "not-a-uuid"})
+    assert response.status_code == 200
+    returned_id = response.headers.get("x-request-id", "")
+    # The supplied invalid ID must not be echoed back.
+    assert returned_id != "not-a-uuid"
+    # A fresh ID was generated.
+    assert len(returned_id) > 0
 
 
 @pytest.mark.asyncio

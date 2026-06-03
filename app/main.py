@@ -4,10 +4,12 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated
+from urllib.parse import urlparse, urlunparse
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from asgi_correlation_id import CorrelationIdMiddleware
+from asgi_correlation_id.middleware import is_valid_uuid4
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -42,16 +44,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     and enqueue is skipped (same best-effort behavior as per-request enqueue).
     """
     set_arq_pool(None)
+    _parsed = urlparse(settings.redis_url)
+    # Strip credentials from the URL before logging — netloc may contain a password.
+    _safe_netloc = (
+        f"{_parsed.hostname}:{_parsed.port}"
+        if _parsed.port
+        else (_parsed.hostname or "")
+    )
+    _redis_host = urlunparse(
+        (
+            _parsed.scheme,
+            _safe_netloc,
+            _parsed.path,
+            _parsed.params,
+            _parsed.query,
+            _parsed.fragment,
+        )
+    )
     try:
         pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         set_arq_pool(pool)
-        logger.info("arq pool connected to %s", settings.redis_url)
+        logger.info("arq pool connected to %s", _redis_host)
     except Exception as exc:
         logger.error(
             "Could not connect to Redis at %s: %s. "
             "API will start without background enqueue; "
             "set REDIS_URL or start Redis with `docker compose up redis -d`.",
-            settings.redis_url,
+            _redis_host,
             exc,
         )
     try:
@@ -75,7 +94,7 @@ app = FastAPI(
 # middleware added FIRST here is the OUTERMOST (first to handle the request).
 # CorrelationIdMiddleware must be outermost so the request ID is set before
 # the Prometheus instrumentator records the request.
-app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(CorrelationIdMiddleware, validator=is_valid_uuid4)
 
 # HTTP metrics: request count, latency histogram, in-flight gauge.
 # expose() registers GET /metrics on the default prometheus_client registry,

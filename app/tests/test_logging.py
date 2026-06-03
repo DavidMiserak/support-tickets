@@ -108,7 +108,13 @@ def test_setup_logging_idempotent() -> None:
     """Calling setup_logging twice does not accumulate duplicate handlers."""
     from app.logging_config import setup_logging
 
-    setup_logging("INFO")
-    setup_logging("INFO")
     root = logging.getLogger()
-    assert len(root.handlers) == 1
+    prior_handlers = root.handlers[:]
+    prior_level = root.level
+    try:
+        setup_logging("INFO")
+        setup_logging("INFO")
+        assert len(root.handlers) == 1
+    finally:
+        root.handlers = prior_handlers
+        root.setLevel(prior_level)
