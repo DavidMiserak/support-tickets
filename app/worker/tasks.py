@@ -33,7 +33,8 @@ async def summarize_ticket(
     ``correlation_id`` carries the request ID from the API process. contextvars
     are not serialized across the Redis job queue boundary, so it is passed as
     an explicit arg and restored here so worker log lines share the same
-    request_id as the originating API request.
+    request_id as the originating API request. The var is always set (including
+    to ``None``) so a prior job cannot leave a stale ID on the worker context.
 
     Failure modes:
     - Ticket deleted before execution: no-op (logged, no event written).
@@ -41,8 +42,7 @@ async def summarize_ticket(
     - Ticket deleted between read and write sessions: IntegrityError caught, no-op.
     - DB commit fails for other reasons: exception propagates; no retry (max_tries=1).
     """
-    if correlation_id is not None:
-        _correlation_id_var.set(correlation_id)
+    _correlation_id_var.set(correlation_id)
 
     start = time.monotonic()
     logger.info("summarize_ticket: started", extra={"ticket_id": ticket_id})

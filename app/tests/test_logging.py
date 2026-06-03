@@ -92,6 +92,18 @@ def test_setup_logging_rejects_invalid_level() -> None:
         setup_logging("VERBOSE")
 
 
+@pytest.mark.parametrize(
+    "level",
+    ["DEBUG", "info", "WARNING", "error", "CRITICAL"],
+)
+def test_setup_logging_accepts_valid_levels(level: str) -> None:
+    """setup_logging resolves standard level names, case-insensitively."""
+    from app.logging_config import setup_logging
+
+    setup_logging(level)
+    assert logging.getLogger().level == logging._nameToLevel[level.strip().upper()]
+
+
 def test_setup_logging_idempotent() -> None:
     """Calling setup_logging twice does not accumulate duplicate handlers."""
     from app.logging_config import setup_logging
