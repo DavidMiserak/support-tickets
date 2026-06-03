@@ -54,6 +54,28 @@ async def test_metrics_endpoint_contains_custom_counters(
     assert "ticket_summarization_outcomes_total" in body
 
 
+@pytest.mark.asyncio
+async def test_metrics_endpoint_omits_process_collectors(
+    async_client: AsyncClient,
+) -> None:
+    """GET /metrics must not leak process/platform/GC internals (issue #9)."""
+    await async_client.get("/health")  # warm up so http_requests_total has a sample
+    response = await async_client.get("/metrics")
+    body = response.text
+
+    # Process/platform/GC collectors are unregistered in app.main.
+    assert "process_cpu_seconds_total" not in body
+    assert "process_resident_memory_bytes" not in body
+    assert "process_open_fds" not in body
+    assert "process_start_time_seconds" not in body
+    assert "python_info" not in body
+    assert "python_gc_objects_collected_total" not in body
+
+    # HTTP + business metrics are still served.
+    assert "http_requests_total" in body
+    assert "tickets_created_total" in body
+
+
 # ---------------------------------------------------------------------------
 # tickets_created_total
 # ---------------------------------------------------------------------------

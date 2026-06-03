@@ -16,6 +16,12 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from prometheus_client import (
+    GC_COLLECTOR,
+    PLATFORM_COLLECTOR,
+    PROCESS_COLLECTOR,
+    REGISTRY,
+)
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi.errors import RateLimitExceeded
 
@@ -106,6 +112,17 @@ app.add_middleware(
     generator=lambda: str(uuid4()),
     validator=is_valid_uuid4,
 )
+
+# Drop the default process/platform/GC collectors before exposing /metrics so
+# the endpoint does not leak operational internals (CPU, memory, open FDs, start
+# time, Python version, GC stats). Only the HTTP and business metrics remain,
+# which keeps GET /metrics safe to serve on the public API port. See issue #9.
+# unregister() is guarded so a re-import (e.g. in tests) cannot raise KeyError.
+for _collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
+    try:
+        REGISTRY.unregister(_collector)
+    except KeyError:
+        pass
 
 # HTTP metrics: request count, latency histogram, in-flight gauge.
 # expose() registers GET /metrics on the default prometheus_client registry,
