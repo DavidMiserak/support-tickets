@@ -54,6 +54,9 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] **`_job_id` dedup** — summarize-at-create, best-effort once; log when `enqueue_job` returns None (already deduped).
 - [x] **max_tries=1** — no automatic retry on failure; pairs with the one-shot enqueue policy above.
 - [x] **Test gaps to add** — `load_model()` failure, pipeline ValueError, enqueue failure → 201, dedup logging, migration 0004 downgrade.
+- [x] **assign_priority task** — heuristic keyword upgrade (never downgrades); writes PRIORITY_CHANGED; migration 0005.
+- [x] **detect_spam task** — phrase + URL heuristics; writes SPAM_FLAGGED event; human reviews flagged tickets.
+- [x] **route_ticket task** — category → department mapping; writes ROUTED event.
 
 ## Deferred from Phase 3 review (autoplan 2026-06-02)
 
@@ -138,4 +141,4 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
 - [x] Phase 4 — observability (structured logging, metrics)
 - [ ] Phase 4b — AnthropicSummarizer backend (standalone PR)
 - [x] Phase 5 — observability hardening (liveness/readiness split, UUID4 fix, probe timeouts)
-- [ ] Phase 6 — Docker/deploy polish
+- [x] Phase 6 — Docker/deploy polish

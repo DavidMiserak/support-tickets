@@ -181,12 +181,12 @@ local-run: install
 
 .PHONY: health
 health:
-	curl -fsS http://localhost:8000/health
+	curl -fsS --max-time 10 http://localhost:8000/health
 	@echo ""
 
 .PHONY: ready
 ready:
-	curl -fsS http://localhost:8000/ready
+	curl -fsS --max-time 10 http://localhost:8000/ready
 	@echo ""
 
 .PHONY: container-config

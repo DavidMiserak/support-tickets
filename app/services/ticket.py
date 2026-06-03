@@ -119,6 +119,27 @@ class TicketService:
                     outcome="enqueue_failed"
                 ).inc()
 
+            _corr = correlation_id.get(None)
+            for task, job_prefix in (
+                ("assign_priority", "assign-priority"),
+                ("detect_spam", "detect-spam"),
+                ("route_ticket", "route"),
+            ):
+                try:
+                    await self._arq_pool.enqueue_job(
+                        task,
+                        ticket.id,
+                        _job_id=f"{job_prefix}-{ticket.id}",
+                        correlation_id=_corr,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to enqueue %s for ticket %d",
+                        task,
+                        ticket.id,
+                        exc_info=True,
+                    )
+
         return ticket
 
     async def get_ticket(self, ticket_id: int) -> Ticket:
