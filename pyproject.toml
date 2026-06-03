@@ -47,9 +47,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["app/tests"]
-addopts = "-q"
+addopts = "-q -m 'not ml'"
 markers = [
     "no_auto_schema: skip the autouse create_all/drop_all fixture (test manages its own schema, e.g. via Alembic)",
+    "ml: optional transformer/ML integration tests (require requirements-ml.txt; run with pytest -m ml)",
 ]
 
 [tool.bandit]
