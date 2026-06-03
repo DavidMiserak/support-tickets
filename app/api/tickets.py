@@ -112,7 +112,7 @@ async def list_tickets(
     (``websearch_to_tsquery``). Supports quoted phrases and ``-`` exclusions.
     Combines freely with status/priority/category filters.
     """
-    search = q.strip() or None if q is not None else None
+    search = (q.strip() or None) if q is not None else None
     tickets, total = await service.list_tickets(
         status=status,
         priority=priority,
