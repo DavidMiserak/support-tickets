@@ -103,23 +103,32 @@ Deferred from Phase 4 (not an observability concept — ships as standalone PR).
 
 ## Phase 5 — Observability hardening (deferred from Phase 4 review)
 
-- [ ] **`/health` Redis-degraded-to-503 causes container restart loop.** Current:
-  `all_ok = db_ok and redis_ok`; any Redis disruption returns 503 and the Docker
-  HEALTHCHECK restarts the container even though Redis is optional for serving
-  requests. Fix: either (a) decouple `/health` liveness from Redis and add a
-  separate `/ready` readiness probe that includes Redis, or (b) raise
-  `healthcheck.retries` and lengthen `healthcheck.interval` on the `api`
-  service in `compose.yaml` (same fields as `db`/`redis`) so a brief Redis
-  blip does not trigger a restart. (Found by
-  adversarial review on feat/observability-4b.)
-- [ ] **X-Request-ID format inconsistency.** Server-generated IDs use `uuid4().hex`
-  (32-char, no hyphens); client-supplied IDs are echoed verbatim in hyphenated
-  form. Log aggregators correlating on `request_id` may see two formats. Fix:
-  add `generator=lambda: str(uuid4())` to `CorrelationIdMiddleware` to produce
-  hyphenated UUIDs consistently.
-- [ ] **`/health` and `/metrics` have no timeouts on DB/Redis probes.** A
-  half-open TCP connection to Postgres or Redis hangs `/health` indefinitely.
-  Wrap probes with `asyncio.wait_for(..., timeout=2.0)`.
+Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
+
+- [x] **`/health` Redis-degraded-to-503 causes container restart loop.** Fixed:
+  `/health` is now a pure liveness probe (200 unconditionally); Redis and DB
+  probes moved to new `/ready` readiness endpoint. Docker HEALTHCHECK targets
+  `/health` so Redis blips no longer trigger container restarts.
+- [x] **X-Request-ID format inconsistency.** Fixed: added
+  `generator=lambda: str(uuid4())` to `CorrelationIdMiddleware`; server-generated
+  IDs are now hyphenated UUID4 matching client-supplied IDs.
+- [x] **`/health` and `/ready` have no timeouts on DB/Redis probes.** Fixed:
+  wrapped both probes in `/ready` with `asyncio.wait_for(..., timeout=2.0)`.
+- [ ] **SQLAlchemy pool state under `asyncio.wait_for` cancellation storms.**
+  When `/ready` times out, `asyncio.wait_for` cancels the `check_database_connection()`
+  coroutine mid-flight. If the coroutine had acquired a pool connection before
+  the cancel, that connection may not be returned cleanly, leaking connections
+  under sustained timeouts. Client disconnects (which send `CancelledError` to
+  the request task) are an additional trigger for the same pool-drain path.
+  Fix: add `connect_args={"timeout": 1.5}` to the `create_async_engine` call
+  in `database.py` so asyncpg enforces its own connection timeout before
+  `wait_for` cancels it. Deferred — low risk for current single-instance deployment.
+- [ ] **`/ready` probes run sequentially (2+2=4s worst case).** Under dual-degraded
+  conditions (both DB and Redis have half-open TCP), each `await asyncio.wait_for(...)`
+  yields to the loop but the handler may not finish for up to 4 seconds, delaying
+  that readiness response (other requests can still run). Running both probes
+  concurrently with `asyncio.gather` would reduce worst-case latency to 2 seconds.
+  Deferred — only matters under simultaneous dual-failure which is rare in practice.
 
 ## Roadmap (from design doc)
 
@@ -128,5 +137,5 @@ Deferred from Phase 4 (not an observability concept — ships as standalone PR).
 - [x] Phase 3 — background worker (arq)
 - [x] Phase 4 — observability (structured logging, metrics)
 - [ ] Phase 4b — AnthropicSummarizer backend (standalone PR)
-- [ ] Phase 5 — full test suite
+- [x] Phase 5 — observability hardening (liveness/readiness split, UUID4 fix, probe timeouts)
 - [ ] Phase 6 — Docker/deploy polish
