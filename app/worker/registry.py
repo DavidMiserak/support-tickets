@@ -4,9 +4,11 @@ The registry is a module-level singleton: ``initialize_backend()`` is called
 once in arq ``on_startup`` and stores the result. Worker tasks call
 ``get_initialized_backend()`` to retrieve it from the module state.
 
-To override in tests, set ``SUMMARIZER_BACKEND`` in the environment (or
-``.env``) before calling ``initialize_backend()``, or patch
-``_initialized_backend`` directly.
+``summarizer_backend`` is read from the import-time :data:`~app.config.settings`
+singleton (populated from ``SUMMARIZER_BACKEND`` / ``.env`` when the process
+starts). To override in tests, patch ``settings.summarizer_backend`` (or
+``app.worker.registry.settings``) before calling ``initialize_backend()``, or
+patch ``_initialized_backend`` directly after init.
 """
 
 import logging
@@ -53,10 +55,10 @@ def _try_init(cls: type, name: str) -> SummarizerBackend | None:
 def initialize_backend() -> SummarizerBackend:
     """Select, initialize, and cache the backend for this worker process.
 
-    Reads ``summarizer_backend`` from :class:`~app.config.Settings` (env
-    ``SUMMARIZER_BACKEND`` or ``.env``). Falls through to the next entry in
-    ``_FALLBACK_ORDER`` if the requested backend is unavailable or fails to
-    load. Always returns a working backend (at minimum NoopSummarizer).
+    Reads ``summarizer_backend`` from :data:`~app.config.settings` (loaded at
+    import from ``SUMMARIZER_BACKEND`` / ``.env``). Falls through to the next
+    entry in ``_FALLBACK_ORDER`` if the requested backend is unavailable or
+    fails to load. Always returns a working backend (at minimum NoopSummarizer).
     """
     global _initialized_backend
 

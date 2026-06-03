@@ -127,6 +127,6 @@ async def health() -> JSONResponse:
     if not await check_database_connection():
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "unavailable", "database": "down"},
+            content={"status": "degraded"},
         )
     return JSONResponse(content={"status": "ok", "database": "ok"})

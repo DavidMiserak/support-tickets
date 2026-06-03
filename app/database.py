@@ -1,5 +1,6 @@
 """Database engine and session management."""
 
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(
     settings.database_url,
@@ -38,6 +41,7 @@ async def check_database_connection() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
+        logger.warning("database health check failed", exc_info=True)
         return False
 
 
