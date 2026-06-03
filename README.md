@@ -3,11 +3,10 @@
 A backend service for managing customer support tickets with asynchronous
 processing. Built with FastAPI, PostgreSQL, and SQLAlchemy (async).
 
-> **Status:** active development. The ticket CRUD API is in place — create,
-> retrieve, list (filter + paginate), and validated status transitions with a
-> transactional audit trail and optimistic locking. Background summarization
-> runs summarize-at-create, best-effort once via arq when Redis and the worker
-> are up (see [Background summarization](#background-summarization)).
+> **Status:** complete. Ticket CRUD API, async background worker (summary,
+> priority, spam detection, department routing), structured JSON logging,
+> Prometheus metrics, liveness/readiness probes — all running in a single
+> `make run`. Worker results are visible in `GET /tickets/{id}` under `events`.
 
 ## Overview
 
@@ -46,8 +45,9 @@ the containerized stack.
 
 ```bash
 cp .env.example .env     # adjust if needed
-make run                 # build and start API + PostgreSQL
+make run                 # build and start all services (migrations run automatically)
 make health              # verify the API is up
+make seed                # load sample agents and tickets (idempotent)
 ```
 
 The API is served at `http://localhost:8000`. The root path redirects to the
@@ -129,24 +129,60 @@ Every error returns a uniform envelope, `{"detail": ..., "error_type": ...}`
 | `concurrent_update`          | 409  | Another request modified the ticket first (retry) |
 | `internal_server_error`      | 500  | Unexpected server failure (details not exposed)     |
 
-### Background summarization
+### Background processing
 
-When Redis and the worker are running, creating a ticket enqueues a
-**summarize-at-create, best-effort once** job:
+When Redis and the worker are running, creating a ticket enqueues four
+background jobs that run asynchronously:
 
-- One job per ticket, deduped by id at enqueue time (`_job_id`)
+- One job per ticket per task, deduped by ticket id at enqueue time
 - Ticket creation succeeds even if Redis is down or enqueue fails
-- The worker runs the job at most once (`max_tries=1`); failures are logged
-  and not retried automatically
-- With `SUMMARIZER_BACKEND=noop` (the compose default), the stored summary
-  equals the ticket description unchanged
-- Summaries are **internal only** for now: they are written as `SUMMARIZED`
-  rows in `ticket_events`, not exposed on the ticket API
-- Duplicate `SUMMARIZED` events are allowed (e.g. manual re-enqueue); there is
-  no DB uniqueness constraint yet
+- Each job runs at most once (`max_tries=1`); failures are logged, not retried
 
-There is no re-summarize endpoint yet; a failed or skipped job is not
-backfilled unless you add that explicitly later.
+Worker results are written to `ticket_events` and returned in
+`GET /tickets/{id}` under the `events` array.
+
+**Worker-emitted event types:**
+
+| `event_type` | `field_changed` | `new_value` |
+|---|---|---|
+| `SUMMARIZED` | `summary` | Generated summary text (or original description with `noop` backend) |
+| `PRIORITY_CHANGED` | `priority` | Upgraded priority (e.g. `"CRITICAL"`) — only if keywords detected; never downgrades |
+| `SPAM_FLAGGED` | `spam` | `"true"` — ticket flagged for human review |
+| `ROUTED` | `department` | Routing department (e.g. `"engineering"`, `"billing"`) |
+
+**Demo — see the async loop end-to-end:**
+
+```bash
+# 1. Create a ticket
+curl -s -X POST http://localhost:8000/tickets \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_name":"Ada","customer_email":"ada@example.com",
+       "subject":"Cannot log in","description":"Login button does nothing.",
+       "category":"TECHNICAL"}' | jq .id
+
+# 2. Wait for workers (~2 seconds)
+sleep 2
+
+# 3. GET the ticket — events array shows worker results
+curl -s http://localhost:8000/tickets/1 | jq .events
+```
+
+You should see a `CREATED` event followed by `SUMMARIZED`, `PRIORITY_CHANGED`
+(if keywords matched), `SPAM_FLAGGED` (if spam detected), and `ROUTED`.
+
+> **Note:** `POST /tickets` and `PATCH /tickets/{id}/status` return a flat
+> ticket object (no `events`). Call `GET /tickets/{id}` to see the full
+> event history.
+
+**Summarizer backend:**
+
+- With `SUMMARIZER_BACKEND=noop` (compose default): stored summary equals the
+  ticket description unchanged
+- With `SUMMARIZER_BACKEND=transformer`: uses `sshleifer/distilbart-cnn-6-6`
+- Duplicate `SUMMARIZED` events are allowed (e.g. manual re-enqueue)
+
+There is no re-summarize endpoint; a failed or skipped job is not backfilled
+unless you add that explicitly later.
 
 ### Connection budget
 
@@ -294,7 +330,22 @@ make run          # build and start the stack
 make health       # curl the /health liveness probe
 make migrate      # apply database migrations in the running container
 make install-ml   # optional: torch + transformers for local worker ML runs
+make seed         # sample agents + tickets for local testing (idempotent)
 make clean        # remove caches and build artifacts
+```
+
+### Seed data
+
+After the stack is up, run `make seed` to insert three support agents and five
+sample tickets covering every status (`OPEN`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`),
+multiple categories, and representative audit events (including worker-style
+`SUMMARIZED` / `ROUTED` / `SPAM_FLAGGED` rows on selected tickets). Re-running
+seed skips rows that already exist (matched by agent email or ticket email+subject).
+
+```bash
+make seed
+curl -s 'http://localhost:8000/tickets?limit=10' | jq '.total, .items[].subject'
+curl -s http://localhost:8000/tickets/2 | jq '.status, .events'
 ```
 
 ## Roadmap
@@ -307,9 +358,12 @@ make clean        # remove caches and build artifacts
 - [x] Structured JSON logging, Prometheus metrics, correlation IDs
 - [x] Observability hardening: liveness/readiness split, UUID4 correlation
   IDs, probe timeouts
-- [ ] Assign-agent endpoint + seed data script
 - [x] Additional worker tasks — priority upgrade, spam detection, department
   routing (heuristic stubs; all write audit events)
+- [x] Worker results visible in `GET /tickets/{id}` under `events`
+- [ ] Assign-agent REST endpoint — deferred (agents table and seed script exist;
+  the spec's "agents to update ticket status" requirement is satisfied by the
+  worker tasks that run automatically on ticket creation)
 
 ## License
 

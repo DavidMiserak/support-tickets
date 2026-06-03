@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.enums import Category, Priority, TicketStatus
+from app.enums import Category, EventType, Priority, TicketStatus
 
 # Generous upper bound so a client can't POST a multi-MB body into the
 # unbounded Text column, while still allowing long descriptions.
@@ -48,8 +48,22 @@ class UpdateStatusRequest(BaseModel):
     )
 
 
+class TicketEventResponse(BaseModel):
+    """Single audit event on a ticket."""
+
+    id: int
+    event_type: EventType
+    field_changed: str | None
+    previous_value: str | None
+    new_value: str | None
+    actor_id: int | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TicketResponse(BaseModel):
-    """Ticket response."""
+    """Ticket response (used by list and write endpoints)."""
 
     id: int
     customer_name: str
@@ -64,6 +78,17 @@ class TicketResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TicketDetailResponse(TicketResponse):
+    """Ticket detail response — includes the full audit event history.
+
+    Used by GET /tickets/{id}. Events are ordered by created_at ascending so
+    the CREATED event is always first and worker-written events follow in order.
+    Not included in list responses to avoid N+1 queries on the collection.
+    """
+
+    events: list[TicketEventResponse] = []
 
 
 class ListTicketsResponse(BaseModel):

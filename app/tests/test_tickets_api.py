@@ -191,3 +191,59 @@ async def test_create_ticket_logs_when_enqueue_deduped(
     with caplog.at_level(logging.INFO, logger="app.services.ticket"):
         await _create(async_client)
     assert "deduped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_ticket_includes_created_event(async_client):
+    """GET /tickets/{id} returns an events list with a CREATED entry."""
+    created = await _create(async_client)
+    resp = await async_client.get(f"/tickets/{created['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "events" in body
+    assert len(body["events"]) >= 1
+    assert body["events"][0]["event_type"] == "CREATED"
+
+
+@pytest.mark.asyncio
+async def test_get_ticket_events_include_status_change(async_client):
+    """GET /tickets/{id} reflects a STATUS_CHANGED event after a PATCH."""
+    created = await _create(async_client)
+    await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "IN_PROGRESS"}
+    )
+    resp = await async_client.get(f"/tickets/{created['id']}")
+    event_types = [e["event_type"] for e in resp.json()["events"]]
+    assert "CREATED" in event_types
+    assert "STATUS_CHANGED" in event_types
+    # CREATED must come before STATUS_CHANGED (ordered by created_at).
+    assert event_types.index("CREATED") < event_types.index("STATUS_CHANGED")
+
+
+@pytest.mark.asyncio
+async def test_list_tickets_items_have_no_events_field(async_client):
+    """GET /tickets list items must not expose the events field."""
+    await _create(async_client)
+    resp = await async_client.get("/tickets")
+    assert resp.status_code == 200
+    for item in resp.json()["items"]:
+        assert "events" not in item
+
+
+@pytest.mark.asyncio
+async def test_get_ticket_invalid_id_returns_422(async_client):
+    """Path(ge=1) rejects id=0 and negative ids with 422."""
+    for bad_id in (0, -1):
+        resp = await async_client.get(f"/tickets/{bad_id}")
+        assert resp.status_code == 422, f"expected 422 for id={bad_id}"
+
+
+@pytest.mark.asyncio
+async def test_update_status_response_has_no_events_field(async_client):
+    """PATCH /tickets/{id}/status returns TicketResponse (no events field)."""
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "IN_PROGRESS"}
+    )
+    assert resp.status_code == 200
+    assert "events" not in resp.json()

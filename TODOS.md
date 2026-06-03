@@ -133,6 +133,30 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   concurrently with `asyncio.gather` would reduce worst-case latency to 2 seconds.
   Deferred — only matters under simultaneous dual-failure which is rare in practice.
 
+## Deferred from Phase 7 (polish) review
+
+- [ ] **`PATCH /tickets/{id}/status` returns flat `TicketResponse` (no events).**
+  `GET /tickets/{id}` returns `TicketDetailResponse` with `events`. The asymmetry
+  is intentional to avoid a second DB query (selectinload) on every PATCH. To
+  fix: reload ticket with `selectinload(Ticket.events)` after commit in
+  `TicketService.update_status`, or add a `get_with_events` helper to the repo.
+
+- [ ] **Assign-agent REST endpoint.** Explicitly deferred — `agents` table, seed
+  script, `ASSIGNED` event type, and `actor_id` FK are all in place. The spec's
+  "agents to update ticket status" requirement is satisfied by the worker tasks.
+  When ready: `PATCH /tickets/{id}/assign` sets `assigned_agent_id`, validates
+  agent exists (404 if not), writes `ASSIGNED` event, returns updated ticket.
+
+- [ ] **Makefile `container-up` exits silently on build failure.** If the build
+  fails or a port is in use, `compose up --build -d` exits 0 with no visible
+  error. Fix: append `|| (echo "Run 'make worker-logs' or 'make container-logs'
+  to debug" && exit 1)` to the `container-up` target.
+
+- [ ] **Events endpoint as an alternative.** If strict REST sub-resource design
+  is preferred over embedding events in `TicketDetailResponse`, add
+  `GET /tickets/{id}/events` returning `list[TicketEventResponse]` with
+  pagination. The repo method and schema already exist.
+
 ## Roadmap (from design doc)
 
 - [x] Phase 1 — foundation: models, migrations, config, `/health`
@@ -142,3 +166,4 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
 - [ ] Phase 4b — AnthropicSummarizer backend (standalone PR)
 - [x] Phase 5 — observability hardening (liveness/readiness split, UUID4 fix, probe timeouts)
 - [x] Phase 6 — Docker/deploy polish
+- [x] Phase 7 — worker results visible in API response (`TicketDetailResponse`)
