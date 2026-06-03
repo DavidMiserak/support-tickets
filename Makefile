@@ -57,7 +57,8 @@ help:
 	@echo "  local-run          Run API locally with uvicorn (reload)"
 	@echo "  health             Check API liveness — /health (no DB/Redis check)"
 	@echo "  ready              Check API readiness — /ready (Postgres + Redis)"
-	@echo "  demo-api           Run scripts/demo-api.sh against localhost:8000"
+	@echo "  review             Alias for demo-api — grader walkthrough (phases A–C)"
+	@echo "  demo-api           Run demo-api.sh (agents-only seed; use make seed for sample tickets)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean              Remove caches and build artifacts"
@@ -193,8 +194,8 @@ ready:
 	curl -fsS --max-time 10 http://localhost:8000/ready
 	@echo ""
 
-.PHONY: demo-api
-demo-api:
+.PHONY: demo-api review
+demo-api review:
 	@curl -fsS --max-time 3 http://localhost:8000/health >/dev/null 2>&1 || \
 		(echo "Error: API not reachable at http://localhost:8000 — start the stack with: make run" >&2; exit 1)
 	@bash scripts/demo-api.sh

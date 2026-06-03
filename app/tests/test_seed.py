@@ -147,3 +147,18 @@ async def test_run_seed_is_idempotent(
         len(seed_module.DEFAULT_TICKETS),
     )
     assert second == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_run_seed_agents_only_skips_tickets(
+    seed_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    agents_created, tickets_created = await seed_module.run_seed(agents_only=True)
+
+    assert agents_created == len(seed_module.DEFAULT_AGENTS)
+    assert tickets_created == 0
+
+    async with seed_session_factory() as session:
+        ticket_count = await session.scalar(select(func.count()).select_from(Ticket))
+
+    assert ticket_count == 0
