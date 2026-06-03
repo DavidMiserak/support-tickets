@@ -195,6 +195,7 @@ class TicketService:
         status: TicketStatus | None = None,
         priority: Priority | None = None,
         category: Category | None = None,
+        search: str | None = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[Ticket], int]:
@@ -203,6 +204,7 @@ class TicketService:
             status=status,
             priority=priority,
             category=category,
+            search=search,
             skip=skip,
             limit=limit,
         )

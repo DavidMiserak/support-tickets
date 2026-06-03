@@ -158,9 +158,12 @@ async def test_status_transition_legal(async_client):
 @pytest.mark.asyncio
 async def test_status_transition_illegal_returns_409(async_client):
     created = await _create(async_client)
-    # OPEN -> RESOLVED is not allowed.
+    # Move to CLOSED (terminal), then verify no further transitions are allowed.
+    await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "CLOSED"}
+    )
     resp = await async_client.patch(
-        f"/tickets/{created['id']}/status", json={"status": "RESOLVED"}
+        f"/tickets/{created['id']}/status", json={"status": "OPEN"}
     )
     assert resp.status_code == 409
     assert resp.json()["error_type"] == "invalid_status_transition"
@@ -382,3 +385,83 @@ async def test_get_ticket_events_truncated_when_over_limit(
     assert body["events_total"] == MAX_TICKET_EVENTS_ON_DETAIL + 4  # CREATED + extras
     assert len(body["events"]) == MAX_TICKET_EVENTS_ON_DETAIL
     assert body["events_truncated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Full-text search (?q=)
+# ---------------------------------------------------------------------------
+
+
+async def _create_with(async_client, **overrides):
+    """Create a ticket with field overrides; return the parsed body."""
+    payload = {**VALID_TICKET, **overrides}
+    resp = await async_client.post("/tickets", json=payload)
+    assert resp.status_code == 201
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_search_finds_match_in_subject(async_client):
+    await _create_with(async_client, subject="Password reset broken", description="x")
+    await _create_with(async_client, subject="Billing question", description="x")
+    resp = await async_client.get("/tickets?q=password+reset")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["subject"] == "Password reset broken"
+
+
+@pytest.mark.asyncio
+async def test_search_finds_match_in_description(async_client):
+    await _create_with(async_client, subject="Login", description="Two-factor fails.")
+    await _create_with(async_client, subject="Other", description="Unrelated content.")
+    resp = await async_client.get("/tickets?q=two-factor")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_no_match_returns_empty(async_client):
+    await _create(async_client)
+    resp = await async_client.get("/tickets?q=xyznonexistentterm")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_is_case_insensitive(async_client):
+    await _create_with(async_client, subject="Critical Outage Alert", description="x")
+    resp = await async_client.get("/tickets?q=OUTAGE")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_combines_with_status_filter(async_client):
+    await _create_with(async_client, subject="API outage", description="x")
+    resp = await async_client.get("/tickets?q=outage&status=OPEN")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+    resp = await async_client.get("/tickets?q=outage&status=CLOSED")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_search_blank_q_returns_all(async_client):
+    await _create(async_client)
+    await _create(async_client)
+    resp_all = await async_client.get("/tickets")
+    resp_blank = await async_client.get("/tickets?q=   ")
+    assert resp_blank.status_code == 200
+    assert resp_blank.json()["total"] == resp_all.json()["total"]
+
+
+@pytest.mark.asyncio
+async def test_search_q_too_long_returns_422(async_client):
+    resp = await async_client.get(f"/tickets?q={'x' * 501}")
+    assert resp.status_code == 422
+    assert resp.json()["error_type"] == "validation_error"

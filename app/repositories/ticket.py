@@ -72,6 +72,7 @@ class TicketRepository:
         status: TicketStatus | None = None,
         priority: Priority | None = None,
         category: Category | None = None,
+        search: str | None = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[Ticket], int]:
@@ -83,6 +84,12 @@ class TicketRepository:
             filters.append(Ticket.priority == priority)
         if category is not None:
             filters.append(Ticket.category == category)
+        if search is not None:
+            filters.append(
+                func.to_tsvector(
+                    "english", Ticket.subject + " " + Ticket.description
+                ).op("@@")(func.websearch_to_tsquery("english", search))
+            )
 
         total = await self.session.scalar(
             select(func.count()).select_from(Ticket).where(*filters)

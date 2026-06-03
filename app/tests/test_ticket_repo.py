@@ -81,6 +81,67 @@ async def test_list_pagination_is_stable_across_pages(test_db):
 
 
 @pytest.mark.asyncio
+async def test_list_search_matches_subject(test_db):
+    repo = TicketRepository(test_db)
+    await repo.add(_ticket(subject="Password reset broken", description="Link 404s."))
+    await repo.add(_ticket(subject="Billing question", description="Invoice problem."))
+    await test_db.commit()
+
+    items, total = await repo.list(search="password reset")
+    assert total == 1
+    assert items[0].subject == "Password reset broken"
+
+
+@pytest.mark.asyncio
+async def test_list_search_matches_description(test_db):
+    repo = TicketRepository(test_db)
+    await repo.add(_ticket(subject="Login issue", description="Two-factor auth fails."))
+    await repo.add(_ticket(subject="Billing question", description="Invoice problem."))
+    await test_db.commit()
+
+    items, total = await repo.list(search="two-factor")
+    assert total == 1
+    assert "auth" in items[0].description.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_search_is_case_insensitive(test_db):
+    repo = TicketRepository(test_db)
+    await repo.add(_ticket(subject="Outage Alert", description="Critical failure."))
+    await test_db.commit()
+
+    items, total = await repo.list(search="OUTAGE")
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_search_no_match_returns_empty(test_db):
+    repo = TicketRepository(test_db)
+    await repo.add(_ticket(subject="Normal ticket", description="Nothing special."))
+    await test_db.commit()
+
+    items, total = await repo.list(search="xyznonexistent")
+    assert total == 0
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_list_search_combines_with_status_filter(test_db):
+    repo = TicketRepository(test_db)
+    await repo.add(
+        _ticket(subject="API outage", description="Down.", status=TicketStatus.OPEN)
+    )
+    await repo.add(
+        _ticket(subject="API outage", description="Down.", status=TicketStatus.CLOSED)
+    )
+    await test_db.commit()
+
+    items, total = await repo.list(search="outage", status=TicketStatus.OPEN)
+    assert total == 1
+    assert items[0].status == TicketStatus.OPEN
+
+
+@pytest.mark.asyncio
 async def test_get_with_events_bounds_and_reports_total(test_db):
     repo = TicketRepository(test_db)
     ticket = await repo.add(_ticket())

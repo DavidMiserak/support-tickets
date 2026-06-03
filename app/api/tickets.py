@@ -86,12 +86,24 @@ async def list_tickets(
     status: TicketStatus | None = None,
     priority: Priority | None = None,
     category: Category | None = None,
+    q: Annotated[str | None, Query(max_length=500)] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ListTicketsResponse:
-    """List tickets with optional filters and pagination."""
+    """List tickets with optional filters, full-text search, and pagination.
+
+    ``q`` searches subject and description using PostgreSQL full-text search
+    (``websearch_to_tsquery``). Supports quoted phrases and ``-`` exclusions.
+    Combines freely with status/priority/category filters.
+    """
+    search = q.strip() or None if q is not None else None
     tickets, total = await service.list_tickets(
-        status=status, priority=priority, category=category, skip=skip, limit=limit
+        status=status,
+        priority=priority,
+        category=category,
+        search=search,
+        skip=skip,
+        limit=limit,
     )
     return ListTicketsResponse(
         items=[TicketResponse.model_validate(t) for t in tickets],
