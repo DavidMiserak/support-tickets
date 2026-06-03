@@ -39,6 +39,8 @@ module = [
     "httpx",
     "httpx.*",
     "arq.*",
+    "anthropic",
+    "anthropic.*",
     "transformers.*",
     "torch.*",
     "asgi_correlation_id",

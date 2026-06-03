@@ -1,0 +1,11 @@
+# requirements-optional.txt
+#
+# Optional dependency for SUMMARIZER_BACKEND=anthropic (Claude Haiku via the
+# Anthropic Messages API). Not installed in the default API or worker container
+# images; install locally to use the anthropic summarizer backend.
+#
+# Requires ANTHROPIC_API_KEY at runtime (see README). If the key is unset or the
+# package is missing, the backend registry falls back to NoopSummarizer.
+-r requirements.txt
+
+anthropic==0.105.2
