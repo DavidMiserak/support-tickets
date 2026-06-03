@@ -3,10 +3,13 @@
 import logging
 import re
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from asgi_correlation_id import correlation_id as _correlation_id_var
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.enums import Category, EventType, Priority
@@ -15,6 +18,51 @@ from app.models import Ticket, TicketEvent
 logger = logging.getLogger(__name__)
 
 _MIN_SUMMARY_WORDS = 5
+
+
+# ---------------------------------------------------------------------------
+# Shared task scaffold
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _ticket_task(
+    ctx: dict[str, Any],
+    ticket_id: int,
+    correlation_id: str | None,
+    task_name: str,
+) -> AsyncGenerator[tuple[AsyncSession, Ticket, float] | None, None]:
+    """Set up correlation ID, timer, session, and ticket fetch for a worker task.
+
+    Yields ``(session, ticket, start_time)`` when the ticket exists, or
+    ``None`` when it has been deleted. Callers check for ``None`` and return
+    early — the warning log is already emitted here so callers don't need to.
+
+    summarize_ticket is intentionally excluded: it opens two separate sessions
+    to release the DB connection during CPU-bound inference, so it cannot share
+    this single-session scaffold.
+    """
+    _correlation_id_var.set(correlation_id)
+    start = time.monotonic()
+    logger.info("%s: started", task_name, extra={"ticket_id": ticket_id})
+
+    session_factory = ctx["session_factory"]
+    async with session_factory() as session:
+        ticket = await session.get(Ticket, ticket_id)
+        if ticket is None:
+            logger.warning(
+                "%s: ticket not found, skipping",
+                task_name,
+                extra={"ticket_id": ticket_id},
+            )
+            yield None
+            return
+        yield session, ticket, start
+
+
+# ---------------------------------------------------------------------------
+# summarize_ticket (two-session pattern — does not use _ticket_task)
+# ---------------------------------------------------------------------------
 
 
 async def summarize_ticket(
@@ -171,23 +219,10 @@ async def assign_priority(
     heuristic suggests a lower or equal priority, the task is a no-op.
     Writes a PRIORITY_CHANGED event and updates Ticket.priority on upgrade.
     """
-    _correlation_id_var.set(correlation_id)
-
-    start = time.monotonic()
-    logger.info("assign_priority: started", extra={"ticket_id": ticket_id})
-
-    session_factory = ctx["session_factory"]
-
-    async with session_factory() as session:
-        ticket = await session.get(Ticket, ticket_id)
-
-        if ticket is None:
-            logger.warning(
-                "assign_priority: ticket not found, skipping",
-                extra={"ticket_id": ticket_id},
-            )
+    async with _ticket_task(ctx, ticket_id, correlation_id, "assign_priority") as ctx_:
+        if ctx_ is None:
             return
-
+        session, ticket, start = ctx_
         computed = _detect_priority(ticket.subject, ticket.description)
 
         if _PRIORITY_RANK[computed] <= _PRIORITY_RANK[ticket.priority]:
@@ -223,16 +258,16 @@ async def assign_priority(
             )
             return
 
-    elapsed = round(time.monotonic() - start, 3)
-    logger.info(
-        "assign_priority: complete",
-        extra={
-            "ticket_id": ticket_id,
-            "previous": previous.value,
-            "new_priority": computed.value,
-            "elapsed_seconds": elapsed,
-        },
-    )
+        elapsed = round(time.monotonic() - start, 3)
+        logger.info(
+            "assign_priority: complete",
+            extra={
+                "ticket_id": ticket_id,
+                "previous": previous.value,
+                "new_priority": computed.value,
+                "elapsed_seconds": elapsed,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -272,23 +307,10 @@ async def detect_spam(
     clean tickets. Ticket status is not changed — a human reviews flagged
     tickets.
     """
-    _correlation_id_var.set(correlation_id)
-
-    start = time.monotonic()
-    logger.info("detect_spam: started", extra={"ticket_id": ticket_id})
-
-    session_factory = ctx["session_factory"]
-
-    async with session_factory() as session:
-        ticket = await session.get(Ticket, ticket_id)
-
-        if ticket is None:
-            logger.warning(
-                "detect_spam: ticket not found, skipping",
-                extra={"ticket_id": ticket_id},
-            )
+    async with _ticket_task(ctx, ticket_id, correlation_id, "detect_spam") as ctx_:
+        if ctx_ is None:
             return
-
+        session, ticket, start = ctx_
         flagged = _is_spam(ticket.subject, ticket.description)
 
         if not flagged:
@@ -312,11 +334,11 @@ async def detect_spam(
             )
             return
 
-    elapsed = round(time.monotonic() - start, 3)
-    logger.info(
-        "detect_spam: flagged",
-        extra={"ticket_id": ticket_id, "elapsed_seconds": elapsed},
-    )
+        elapsed = round(time.monotonic() - start, 3)
+        logger.info(
+            "detect_spam: flagged",
+            extra={"ticket_id": ticket_id, "elapsed_seconds": elapsed},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -342,23 +364,10 @@ async def route_ticket(
     is deterministic: category → department string. A ROUTED event is always
     written (every ticket has a category).
     """
-    _correlation_id_var.set(correlation_id)
-
-    start = time.monotonic()
-    logger.info("route_ticket: started", extra={"ticket_id": ticket_id})
-
-    session_factory = ctx["session_factory"]
-
-    async with session_factory() as session:
-        ticket = await session.get(Ticket, ticket_id)
-
-        if ticket is None:
-            logger.warning(
-                "route_ticket: ticket not found, skipping",
-                extra={"ticket_id": ticket_id},
-            )
+    async with _ticket_task(ctx, ticket_id, correlation_id, "route_ticket") as ctx_:
+        if ctx_ is None:
             return
-
+        session, ticket, start = ctx_
         department = _DEPARTMENT[ticket.category]
 
         try:
@@ -378,12 +387,12 @@ async def route_ticket(
             )
             return
 
-    elapsed = round(time.monotonic() - start, 3)
-    logger.info(
-        "route_ticket: complete",
-        extra={
-            "ticket_id": ticket_id,
-            "department": department,
-            "elapsed_seconds": elapsed,
-        },
-    )
+        elapsed = round(time.monotonic() - start, 3)
+        logger.info(
+            "route_ticket: complete",
+            extra={
+                "ticket_id": ticket_id,
+                "department": department,
+                "elapsed_seconds": elapsed,
+            },
+        )
