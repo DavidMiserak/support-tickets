@@ -141,11 +141,9 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   fix: reload ticket with `selectinload(Ticket.events)` after commit in
   `TicketService.update_status`, or add a `get_with_events` helper to the repo.
 
-- [ ] **Assign-agent REST endpoint.** Explicitly deferred — `agents` table, seed
-  script, `ASSIGNED` event type, and `actor_id` FK are all in place. The spec's
-  "agents to update ticket status" requirement is satisfied by the worker tasks.
-  When ready: `PATCH /tickets/{id}/assign` sets `assigned_agent_id`, validates
-  agent exists (404 if not), writes `ASSIGNED` event, returns updated ticket.
+- [x] **Assign-agent REST endpoint.** `PATCH /tickets/{id}/assign` sets
+  `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
+  `ASSIGNED` event, returns `TicketResponse`.
 
 - [ ] **Makefile `container-up` exits silently on build failure.** If the build
   fails or a port is in use, `compose up --build -d` exits 0 with no visible

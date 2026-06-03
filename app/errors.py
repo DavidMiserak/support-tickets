@@ -27,6 +27,16 @@ class TicketNotFoundError(TicketError):
         super().__init__(f"ticket {ticket_id} not found")
 
 
+class AgentNotFoundError(TicketError):
+    """Support agent does not exist."""
+
+    error_type = "agent_not_found"
+    status_code = 404
+
+    def __init__(self, agent_id: int) -> None:
+        super().__init__(f"agent {agent_id} not found")
+
+
 class InvalidStatusTransitionError(TicketError):
     """Status transition is not allowed."""
 

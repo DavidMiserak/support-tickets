@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 from app.arq_pool import get_arq_pool
 from app.database import Base, get_session
 from app.main import app
+from app.models import Agent
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
@@ -60,6 +61,15 @@ async def test_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
     await engine.dispose()
+
+
+@pytest.fixture
+async def test_agent(test_db: AsyncSession) -> int:
+    """Persist a support agent for assign-endpoint tests."""
+    agent = Agent(name="Assign Agent", email="assign-test@example.com")
+    test_db.add(agent)
+    await test_db.flush()
+    return agent.id
 
 
 @pytest.fixture

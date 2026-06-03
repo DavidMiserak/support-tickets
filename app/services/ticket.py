@@ -14,6 +14,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.enums import Category, EventType, Priority, TicketStatus
 from app.errors import (
+    AgentNotFoundError,
     ConcurrentUpdateError,
     InvalidStatusTransitionError,
     TicketNotFoundError,
@@ -212,4 +213,50 @@ class TicketService:
         ticket_status_transitions_total.labels(
             from_status=previous.value, to_status=new_status.value
         ).inc()
+        return ticket
+
+    async def assign_agent(
+        self,
+        ticket_id: int,
+        agent_id: int,
+        *,
+        actor_id: int | None = None,
+    ) -> Ticket:
+        """Assign a ticket to an agent, recording an ASSIGNED audit event.
+
+        Same-agent requests are idempotent no-ops. Unknown agents raise
+        AgentNotFoundError; a concurrent write raises ConcurrentUpdateError.
+        """
+        ticket = await self.get_ticket(ticket_id)
+
+        agent = await self.repo.get_agent(agent_id)
+        if agent is None:
+            raise AgentNotFoundError(agent_id)
+
+        if ticket.assigned_agent_id == agent_id:
+            return ticket
+
+        previous = (
+            str(ticket.assigned_agent_id)
+            if ticket.assigned_agent_id is not None
+            else None
+        )
+        ticket.assigned_agent_id = agent_id
+        self.repo.add_event(
+            TicketEvent(
+                ticket_id=ticket.id,
+                event_type=EventType.ASSIGNED,
+                field_changed="assigned_agent_id",
+                previous_value=previous,
+                new_value=str(agent_id),
+                actor_id=actor_id if actor_id is not None else agent_id,
+            )
+        )
+        try:
+            await self.session.commit()
+        except StaleDataError as exc:
+            await self.session.rollback()
+            raise ConcurrentUpdateError(ticket_id) from exc
+
+        await self.session.refresh(ticket)
         return ticket

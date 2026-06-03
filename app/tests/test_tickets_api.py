@@ -2,6 +2,7 @@
 
 import pytest
 from httpx import AsyncClient
+from pytest import MonkeyPatch
 
 VALID_TICKET = {
     "customer_name": "Ada Lovelace",
@@ -247,3 +248,101 @@ async def test_update_status_response_has_no_events_field(async_client):
     )
     assert resp.status_code == 200
     assert "events" not in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_returns_200(
+    async_client: AsyncClient, test_agent: int
+) -> None:
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/assign", json={"agent_id": test_agent}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["assigned_agent_id"] == test_agent
+    assert "events" not in body
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_missing_agent_returns_404(
+    async_client: AsyncClient,
+) -> None:
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/assign", json={"agent_id": 999_999}
+    )
+    assert resp.status_code == 404
+    assert resp.json() == {
+        "detail": "agent 999999 not found",
+        "error_type": "agent_not_found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_missing_ticket_returns_404(
+    async_client: AsyncClient, test_agent: int
+) -> None:
+    resp = await async_client.patch(
+        "/tickets/999999/assign", json={"agent_id": test_agent}
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error_type"] == "ticket_not_found"
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_idempotent_same_agent(
+    async_client: AsyncClient, test_agent: int
+) -> None:
+    created = await _create(async_client)
+    url = f"/tickets/{created['id']}/assign"
+    first = await async_client.patch(url, json={"agent_id": test_agent})
+    second = await async_client.patch(url, json={"agent_id": test_agent})
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["assigned_agent_id"] == test_agent
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_invalid_agent_id_returns_422(
+    async_client: AsyncClient,
+) -> None:
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/assign", json={"agent_id": 0}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error_type"] == "validation_error"
+
+
+@pytest.mark.asyncio
+async def test_get_ticket_includes_assigned_event(
+    async_client: AsyncClient, test_agent: int
+) -> None:
+    created = await _create(async_client)
+    await async_client.patch(
+        f"/tickets/{created['id']}/assign", json={"agent_id": test_agent}
+    )
+    resp = await async_client.get(f"/tickets/{created['id']}")
+    event_types = [e["event_type"] for e in resp.json()["events"]]
+    assert "ASSIGNED" in event_types
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_concurrent_update_returns_409(
+    async_client: AsyncClient, test_agent: int, monkeypatch: MonkeyPatch
+) -> None:
+    from app.errors import ConcurrentUpdateError
+    from app.services.ticket import TicketService
+
+    async def boom(*_args: object, **_kwargs: object) -> None:
+        raise ConcurrentUpdateError(1)
+
+    monkeypatch.setattr(TicketService, "assign_agent", boom)
+
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/assign", json={"agent_id": test_agent}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error_type"] == "concurrent_update"
