@@ -16,6 +16,17 @@ services:
             redis:
                 condition: service_healthy
         restart: unless-stopped
+        # Overrides the HEALTHCHECK in the Containerfile. Uses /health (pure
+        # liveness, no DB/Redis I/O) so the worker waits until uvicorn is
+        # serving, not until all dependencies are reachable. start_period: 30s
+        # gives migrations headroom before the first probe is evaluated.
+        healthcheck:
+            test: ["CMD", "python", "-c",
+                   "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+            interval: 10s
+            timeout: 5s
+            start_period: 30s
+            retries: 5
 
     redis:
         image: docker.io/library/redis:7-alpine
@@ -34,9 +45,10 @@ services:
             context: .
             dockerfile: Containerfile
         # Runs the arq background worker. Picks up jobs enqueued by the API.
-        # Run migrations before arq so SUMMARIZED CHECK exists even if the API
-        # container is still starting (both depend on db healthy in parallel).
-        command: sh -c "alembic upgrade head && python -m arq app.worker.main.WorkerSettings"
+        # The API service (via scripts/start.sh) owns migrations; the worker
+        # waits for the API to be healthy before starting so migrations are
+        # guaranteed to be applied before any job processing begins.
+        command: python -m arq app.worker.main.WorkerSettings
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379
@@ -49,6 +61,11 @@ services:
                 condition: service_healthy
             redis:
                 condition: service_healthy
+            api:
+                condition: service_healthy
+        # Note: restart: unless-stopped re-starts the worker without re-checking
+        # depends_on. This is safe — migrations are already applied and the worker
+        # uses its own DB/Redis connections directly.
         restart: unless-stopped
 
     # Run the test suite against a real Postgres. Enabled only via the `test`

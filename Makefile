@@ -54,7 +54,8 @@ help:
 	@echo "Run:"
 	@echo "  run                Run API in container (first-class default)"
 	@echo "  local-run          Run API locally with uvicorn (reload)"
-	@echo "  health             Check API /health endpoint"
+	@echo "  health             Check API liveness — /health (no DB/Redis check)"
+	@echo "  ready              Check API readiness — /ready (Postgres + Redis)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean              Remove caches and build artifacts"
@@ -181,6 +182,11 @@ local-run: install
 .PHONY: health
 health:
 	curl -fsS http://localhost:8000/health
+	@echo ""
+
+.PHONY: ready
+ready:
+	curl -fsS http://localhost:8000/ready
 	@echo ""
 
 .PHONY: container-config
