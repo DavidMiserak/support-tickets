@@ -35,15 +35,16 @@ help:
 	@echo "  local-test         Run tests locally against compose Postgres"
 	@echo "  local-coverage     Run coverage locally against compose Postgres"
 	@echo "  test-ml            Demo DistilBART summary + run ML pytest (requires install-ml)"
-	@echo "  validate           Validate local FastAPI/tooling setup"
+	@echo "  validate           Validate local FastAPI/tooling setup (alias: local-validate)"
 	@echo "  pre-commit-setup   Install and run pre-commit hooks"
 	@echo "  sonar              Run Sonar scan (requires SONAR_ORGANIZATION + SONAR_TOKEN)"
 	@echo ""
 	@echo "Container:"
 	@echo "  (default runtime: $(RUNTIME); override with RUNTIME=docker)"
 	@echo "  container-config   Validate compose file"
-	@echo "  container-up       Build and start API + DB"
+	@echo "  container-up       Build and start API, Postgres, Redis, and worker"
 	@echo "  container-down     Stop and remove compose services"
+	@echo "  clear-db           Stop stack and wipe Postgres volume (fresh DB)"
 	@echo "  container-logs     Tail API logs"
 	@echo "  worker-logs        Tail background worker logs"
 	@echo "  container-test     Run tests in test container"
@@ -56,6 +57,7 @@ help:
 	@echo "  local-run          Run API locally with uvicorn (reload)"
 	@echo "  health             Check API liveness — /health (no DB/Redis check)"
 	@echo "  ready              Check API readiness — /ready (Postgres + Redis)"
+	@echo "  demo-api           Run scripts/demo-api.sh against localhost:8000"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean              Remove caches and build artifacts"
@@ -95,11 +97,13 @@ pre-commit-setup:
 	pre-commit install --install-hooks
 	pre-commit run --all-files
 
-.PHONY: local-validate
+.PHONY: local-validate validate
 local-validate: local-install
 	pre-commit validate-config
 	$(PYTHON) -c "import tomllib; tomllib.load(open('pyproject.toml','rb')); print('pyproject ok')"
 	$(PYTHON) -c "from app.main import app; print(app.title)"
+
+validate: local-validate
 
 .PHONY: test-db
 test-db:
@@ -130,17 +134,15 @@ local-coverage: install-dev test-db
 	$(PYTHON) -m coverage xml -o coverage.xml
 
 .PHONY: container-test
-container-test:
+container-test: test-db
 	$(COMPOSE) --profile test build test
 	$(COMPOSE) --profile test run --rm test
-	$(COMPOSE) down
 
 .PHONY: container-coverage
-container-coverage:
+container-coverage: test-db
 	$(COMPOSE) --profile test build test
 	$(COMPOSE) --profile test run --rm -v "$(PWD):/app" test \
 		sh -c "coverage erase && coverage run -m pytest app/tests -q && coverage report -m && coverage xml -o coverage.xml"
-	$(COMPOSE) down
 
 .PHONY: test
 test:
@@ -189,6 +191,12 @@ ready:
 	curl -fsS --max-time 10 http://localhost:8000/ready
 	@echo ""
 
+.PHONY: demo-api
+demo-api:
+	@curl -fsS --max-time 3 http://localhost:8000/health >/dev/null 2>&1 || \
+		(echo "Error: API not reachable at http://localhost:8000 — start the stack with: make run" >&2; exit 1)
+	@bash scripts/demo-api.sh
+
 .PHONY: container-config
 container-config:
 	$(COMPOSE) config
@@ -201,6 +209,12 @@ container-up:
 container-down:
 	$(COMPOSE) down
 
+.PHONY: clear-db
+clear-db:
+	@echo "Stopping compose services and removing postgres_data volume..."
+	$(COMPOSE) down -v
+	@echo "Postgres cleared. Next: make run (migrations run on API start; optional: make seed, make demo-api)"
+
 .PHONY: container-logs
 container-logs:
 	$(COMPOSE) logs -f api
@@ -211,10 +225,14 @@ worker-logs:
 
 .PHONY: migrate
 migrate:
+	@$(COMPOSE) exec -T api true >/dev/null 2>&1 || \
+		(echo "Error: api service is not running — start the stack with: make run" >&2; exit 1)
 	$(COMPOSE) exec api alembic upgrade head
 
 .PHONY: seed
 seed:
+	@$(COMPOSE) exec -T api true >/dev/null 2>&1 || \
+		(echo "Error: api service is not running — start the stack with: make run" >&2; exit 1)
 	$(COMPOSE) exec api python -m scripts.seed
 
 .PHONY: clean

@@ -1,3 +1,3 @@
--- Initialize test database on first container run.
--- This script runs in the main DB; it creates the test DB if it doesn't exist.
-CREATE DATABASE IF NOT EXISTS ticketsupport_test;
+-- Creates the isolated test database on first volume initialization.
+-- (docker-entrypoint-initdb.d runs this only when the data directory is empty.)
+CREATE DATABASE ticketsupport_test;

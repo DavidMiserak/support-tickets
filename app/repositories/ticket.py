@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.enums import Category, Priority, TicketStatus
-from app.models import Ticket, TicketEvent
+from app.models import Agent, Ticket, TicketEvent
 
 
 class TicketRepository:
@@ -35,6 +35,11 @@ class TicketRepository:
             .options(selectinload(Ticket.events))
             .where(Ticket.id == ticket_id)
         )
+        return result.scalar_one_or_none()
+
+    async def get_agent(self, agent_id: int) -> Agent | None:
+        """Return a support agent by id, or None."""
+        result = await self.session.execute(select(Agent).where(Agent.id == agent_id))
         return result.scalar_one_or_none()
 
     async def list(

@@ -91,9 +91,25 @@ Once running, interactive docs are available at:
 Enum values (`status`, `priority`, `category`) are accepted case-insensitively
 and echoed back in canonical upper case.
 
+**Source of truth:** [`scripts/demo-api.sh`](scripts/demo-api.sh) runs the full
+happy path plus error-envelope checks against a live API. It captures ticket
+ids from responses (no hardcoded `1`), seeds agents when a compose `api`
+container is running, and exits non-zero on the first failure.
+
 ```bash
-# Create a ticket (201). The smallest valid body needs name, email, subject,
-# description, and category; priority defaults to MEDIUM.
+make run          # start API + Postgres + Redis + worker
+make demo-api     # or: ./scripts/demo-api.sh
+```
+
+By default the script also exercises async worker events when Redis is healthy
+(`DEMO_WORKER=auto`). Set `DEMO_WORKER=0` to skip that block, or `VERBOSE=1` to
+print JSON bodies. See `./scripts/demo-api.sh --help`.
+
+The curls below mirror what the script exercises (replace `{id}` with a real
+ticket id from `POST /tickets`):
+
+```bash
+# Create a ticket (201). Priority defaults to MEDIUM; category is case-insensitive.
 curl -s -X POST http://localhost:8000/tickets \
   -H 'Content-Type: application/json' \
   -d '{
@@ -104,16 +120,21 @@ curl -s -X POST http://localhost:8000/tickets \
         "category": "technical"
       }'
 
-# Retrieve one ticket (200, or 404 if missing)
-curl -s http://localhost:8000/tickets/1
+# Retrieve one ticket with event history (200, or 404 if missing)
+curl -s http://localhost:8000/tickets/{id}
 
 # List with filters + pagination (200). Returns {items, total, skip, limit}.
-curl -s 'http://localhost:8000/tickets?status=OPEN&skip=0&limit=20'
+curl -s 'http://localhost:8000/tickets?status=OPEN&priority=MEDIUM&category=TECHNICAL&skip=0&limit=20'
 
 # Transition status (200). Illegal moves return 409; CLOSED is terminal.
-curl -s -X PATCH http://localhost:8000/tickets/1/status \
+curl -s -X PATCH http://localhost:8000/tickets/{id}/status \
   -H 'Content-Type: application/json' \
   -d '{"status": "in_progress"}'
+
+# Assign to an agent (200). Run `make seed` first so agent ids exist.
+curl -s -X PATCH http://localhost:8000/tickets/{id}/assign \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": 1}'
 ```
 
 ### Errors
@@ -125,6 +146,7 @@ Every error returns a uniform envelope, `{"detail": ..., "error_type": ...}`
 |------------------------------|------|--------------------------------------------------|
 | `validation_error`           | 422  | Request body/params failed validation            |
 | `ticket_not_found`           | 404  | No ticket with that id                            |
+| `agent_not_found`            | 404  | No support agent with that id                     |
 | `invalid_status_transition`  | 409  | Status move not allowed (e.g. out of `CLOSED`)    |
 | `concurrent_update`          | 409  | Another request modified the ticket first (retry) |
 | `internal_server_error`      | 500  | Unexpected server failure (details not exposed)     |
@@ -153,26 +175,15 @@ Worker results are written to `ticket_events` and returned in
 **Demo — see the async loop end-to-end:**
 
 ```bash
-# 1. Create a ticket
-curl -s -X POST http://localhost:8000/tickets \
-  -H 'Content-Type: application/json' \
-  -d '{"customer_name":"Ada","customer_email":"ada@example.com",
-       "subject":"Cannot log in","description":"Login button does nothing.",
-       "category":"TECHNICAL"}' | jq .id
-
-# 2. Wait for workers (~2 seconds)
-sleep 2
-
-# 3. GET the ticket — events array shows worker results
-curl -s http://localhost:8000/tickets/1 | jq .events
+make demo-api   # includes worker checks when Redis is up (DEMO_WORKER=auto)
 ```
 
-You should see a `CREATED` event followed by `SUMMARIZED`, `PRIORITY_CHANGED`
-(if keywords matched), `SPAM_FLAGGED` (if spam detected), and `ROUTED`.
+The script polls until it sees `CREATED`, `SUMMARIZED`, `PRIORITY_CHANGED`,
+`SPAM_FLAGGED`, and `ROUTED`, and asserts priority was upgraded to `CRITICAL`.
 
-> **Note:** `POST /tickets` and `PATCH /tickets/{id}/status` return a flat
-> ticket object (no `events`). Call `GET /tickets/{id}` to see the full
-> event history.
+> **Note:** `POST /tickets` and `PATCH .../status` or `.../assign` return a flat
+> ticket object (no `events`). Call `GET /tickets/{id}` to see the full event
+> history.
 
 **Summarizer backend:**
 
@@ -183,22 +194,6 @@ You should see a `CREATED` event followed by `SUMMARIZED`, `PRIORITY_CHANGED`
 
 There is no re-summarize endpoint; a failed or skipped job is not backfilled
 unless you add that explicitly later.
-
-### Connection budget
-
-Each Python process (API **and** worker) creates its own SQLAlchemy pool
-(`app/database.py`: `pool_size=20`, `max_overflow=10` → up to **30**
-connections per process). The default Compose stack runs **two** processes, so
-plan for roughly **60** concurrent Postgres connections under burst load.
-
-PostgreSQL’s default `max_connections` is **100**, which leaves modest headroom
-for admin sessions and migration tooling. Before scaling out — multiple uvicorn
-workers, several worker replicas, or other services on the same database —
-either lower per-process pool settings or raise `max_connections` in Postgres.
-
-The worker holds at most `max_jobs=10` concurrent arq tasks; each
-`summarize_ticket` job uses two short DB sessions (read ticket, then write
-event), so jobs do not hold a connection open during CPU-bound summarization.
 
 ### Transformer summarizer (optional)
 
@@ -310,8 +305,6 @@ curl http://localhost:8000/ready
 # {"status": "degraded","database": "ok",          "redis": "unavailable"}
 ```
 
-HTTP 200 when both components are healthy; 503 when either is degraded.
-
 ## Testing
 
 ```bash
@@ -321,6 +314,22 @@ make test-ml      # print a sample DistilBART summary + run ML integration test
 ```
 
 Tests run against an isolated `ticketsupport_test` database.
+
+## Connection pool
+
+Each Python process (API **and** worker) creates its own SQLAlchemy pool
+(`app/database.py`: `pool_size=20`, `max_overflow=10` → up to **30**
+connections per process). The default Compose stack runs **two** processes, so
+plan for roughly **60** concurrent Postgres connections under burst load.
+
+PostgreSQL's default `max_connections` is **100**, which leaves modest headroom
+for admin sessions and migration tooling. Before scaling out — multiple uvicorn
+workers, several worker replicas, or other services on the same database —
+either lower per-process pool settings or raise `max_connections` in Postgres.
+
+The worker holds at most `max_jobs=10` concurrent arq tasks; each
+`summarize_ticket` job uses two short DB sessions (read ticket, then write
+event), so jobs do not hold a connection open during CPU-bound summarization.
 
 ## Common Commands
 
@@ -361,9 +370,9 @@ curl -s http://localhost:8000/tickets/2 | jq '.status, .events'
 - [x] Additional worker tasks — priority upgrade, spam detection, department
   routing (heuristic stubs; all write audit events)
 - [x] Worker results visible in `GET /tickets/{id}` under `events`
-- [ ] Assign-agent REST endpoint — deferred (agents table and seed script exist;
-  the spec's "agents to update ticket status" requirement is satisfied by the
-  worker tasks that run automatically on ticket creation)
+- [x] Assign-agent REST endpoint — `PATCH /tickets/{id}/assign` sets
+  `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
+  `ASSIGNED` audit event; idempotent when already assigned to the same agent
 
 ## License
 

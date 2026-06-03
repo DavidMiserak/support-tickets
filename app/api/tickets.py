@@ -12,6 +12,7 @@ from app.database import get_session
 from app.enums import Category, Priority, TicketStatus
 from app.repositories.ticket import TicketRepository
 from app.schemas import (
+    AssignAgentRequest,
     CreateTicketRequest,
     ErrorEnvelope,
     ListTicketsResponse,
@@ -106,4 +107,19 @@ async def update_status(
 ) -> TicketResponse:
     """Transition a ticket to a new status."""
     ticket = await service.update_status(ticket_id, req.status)
+    return TicketResponse.model_validate(ticket)
+
+
+@router.patch(
+    "/{ticket_id}/assign",
+    response_model=TicketResponse,
+    responses={**_NOT_FOUND, **_CONFLICT, **_UNPROCESSABLE},
+)
+async def assign_agent(
+    ticket_id: Annotated[int, Path(ge=1)],
+    req: AssignAgentRequest,
+    service: ServiceDep,
+) -> TicketResponse:
+    """Assign a ticket to a support agent."""
+    ticket = await service.assign_agent(ticket_id, req.agent_id)
     return TicketResponse.model_validate(ticket)

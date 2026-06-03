@@ -48,6 +48,14 @@ class UpdateStatusRequest(BaseModel):
     )
 
 
+class AssignAgentRequest(BaseModel):
+    """Assign a support agent to a ticket."""
+
+    agent_id: int = Field(..., ge=1)
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{"agent_id": 1}]})
+
+
 class TicketEventResponse(BaseModel):
     """Single audit event on a ticket."""
 

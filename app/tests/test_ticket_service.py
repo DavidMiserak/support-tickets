@@ -13,6 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.enums import EventType, TicketStatus
 from app.errors import (
+    AgentNotFoundError,
     ConcurrentUpdateError,
     InvalidStatusTransitionError,
     TicketNotFoundError,
@@ -28,9 +29,12 @@ def test_every_status_is_a_transition_key() -> None:
     assert set(ALLOWED_TRANSITIONS) == set(TicketStatus)
 
 
-def _service(ticket: Ticket | None) -> tuple[TicketService, MagicMock, AsyncMock]:
+def _service(
+    ticket: Ticket | None, *, agent_exists: bool = True
+) -> tuple[TicketService, MagicMock, AsyncMock]:
     repo = MagicMock(spec=TicketRepository)
     repo.get = AsyncMock(return_value=ticket)
+    repo.get_agent = AsyncMock(return_value=MagicMock() if agent_exists else None)
     repo.add_event = MagicMock()
     session = AsyncMock(spec=AsyncSession)
     return TicketService(session, repo), repo, session
@@ -106,3 +110,67 @@ async def test_closed_is_terminal_for_every_target() -> None:
         service, _, _ = _service(ticket)
         with pytest.raises(InvalidStatusTransitionError):
             await service.update_status(1, target)
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_writes_assigned_event() -> None:
+    ticket = Ticket(id=1, status=TicketStatus.OPEN, assigned_agent_id=None)
+    service, repo, session = _service(ticket)
+
+    result = await service.assign_agent(1, 7)
+
+    assert result.assigned_agent_id == 7
+    repo.get_agent.assert_awaited_once_with(7)
+    repo.add_event.assert_called_once()
+    event: TicketEvent = repo.add_event.call_args.args[0]
+    assert event.event_type == EventType.ASSIGNED
+    assert event.field_changed == "assigned_agent_id"
+    assert event.previous_value is None
+    assert event.new_value == "7"
+    assert event.actor_id == 7
+    session.commit.assert_awaited_once()
+    session.refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_same_agent_is_idempotent_noop() -> None:
+    ticket = Ticket(id=1, status=TicketStatus.OPEN, assigned_agent_id=7)
+    service, repo, session = _service(ticket)
+
+    result = await service.assign_agent(1, 7)
+
+    assert result is ticket
+    repo.get_agent.assert_awaited_once_with(7)
+    repo.add_event.assert_not_called()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_unknown_agent_raises() -> None:
+    ticket = Ticket(id=1, status=TicketStatus.OPEN)
+    service, repo, session = _service(ticket, agent_exists=False)
+
+    with pytest.raises(AgentNotFoundError):
+        await service.assign_agent(1, 99)
+    repo.add_event.assert_not_called()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_unknown_ticket_raises_not_found() -> None:
+    service, repo, session = _service(None)
+
+    with pytest.raises(TicketNotFoundError):
+        await service.assign_agent(999, 1)
+    repo.get_agent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assign_agent_stale_data_becomes_concurrent_update() -> None:
+    ticket = Ticket(id=1, status=TicketStatus.OPEN)
+    service, repo, session = _service(ticket)
+    session.commit.side_effect = StaleDataError("UPDATE", 1, 0)
+
+    with pytest.raises(ConcurrentUpdateError):
+        await service.assign_agent(1, 3)
+    session.rollback.assert_awaited_once()
