@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from app.api import tickets
 from app.arq_pool import get_arq_pool, set_arq_pool
 from app.config import settings
+from app.database import check_database_connection
 from app.errors import (
     INTERNAL_SERVER_ERROR_DETAIL,
     INTERNAL_SERVER_ERROR_TYPE,
@@ -121,6 +122,11 @@ async def root() -> RedirectResponse:
 
 
 @app.get("/health", tags=["health"])
-async def health() -> dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "ok"}
+async def health() -> JSONResponse:
+    """Liveness/readiness: process is up and Postgres accepts queries."""
+    if not await check_database_connection():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unavailable", "database": "down"},
+        )
+    return JSONResponse(content={"status": "ok", "database": "ok"})
