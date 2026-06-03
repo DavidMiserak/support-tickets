@@ -49,7 +49,9 @@ class Ticket(Base):
     )
 
     events: Mapped[list["TicketEvent"]] = relationship(
-        back_populates="ticket", lazy="raise"
+        back_populates="ticket",
+        lazy="raise",
+        order_by="TicketEvent.created_at",
     )
 
     __mapper_args__ = {"version_id_col": version_id}

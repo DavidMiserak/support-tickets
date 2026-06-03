@@ -3,7 +3,7 @@
 from typing import Annotated, Any
 
 from arq.connections import ArqRedis
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.schemas import (
     CreateTicketRequest,
     ErrorEnvelope,
     ListTicketsResponse,
+    TicketDetailResponse,
     TicketResponse,
     UpdateStatusRequest,
     ValidationErrorEnvelope,
@@ -57,13 +58,15 @@ async def create_ticket(
 
 @router.get(
     "/{ticket_id}",
-    response_model=TicketResponse,
+    response_model=TicketDetailResponse,
     responses={**_NOT_FOUND, **_UNPROCESSABLE},
 )
-async def get_ticket(ticket_id: int, service: ServiceDep) -> TicketResponse:
-    """Fetch a single ticket by id."""
+async def get_ticket(
+    ticket_id: Annotated[int, Path(ge=1)], service: ServiceDep
+) -> TicketDetailResponse:
+    """Fetch a single ticket by id, including its full audit event history."""
     ticket = await service.get_ticket(ticket_id)
-    return TicketResponse.model_validate(ticket)
+    return TicketDetailResponse.model_validate(ticket)
 
 
 @router.get(
@@ -97,7 +100,9 @@ async def list_tickets(
     responses={**_NOT_FOUND, **_CONFLICT, **_UNPROCESSABLE},
 )
 async def update_status(
-    ticket_id: int, req: UpdateStatusRequest, service: ServiceDep
+    ticket_id: Annotated[int, Path(ge=1)],
+    req: UpdateStatusRequest,
+    service: ServiceDep,
 ) -> TicketResponse:
     """Transition a ticket to a new status."""
     ticket = await service.update_status(ticket_id, req.status)

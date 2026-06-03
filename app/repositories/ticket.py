@@ -6,6 +6,7 @@ The repository owns SQLAlchemy: it builds queries and stages writes with
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.enums import Category, Priority, TicketStatus
 from app.models import Ticket, TicketEvent
@@ -28,9 +29,11 @@ class TicketRepository:
         self.session.add(event)
 
     async def get(self, ticket_id: int) -> Ticket | None:
-        """Return a ticket by id, or None."""
+        """Return a ticket by id with its events eager-loaded, or None."""
         result = await self.session.execute(
-            select(Ticket).where(Ticket.id == ticket_id)
+            select(Ticket)
+            .options(selectinload(Ticket.events))
+            .where(Ticket.id == ticket_id)
         )
         return result.scalar_one_or_none()
 
