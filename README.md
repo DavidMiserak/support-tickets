@@ -308,7 +308,8 @@ make clean        # remove caches and build artifacts
 - [x] Observability hardening: liveness/readiness split, UUID4 correlation
   IDs, probe timeouts
 - [ ] Assign-agent endpoint + seed data script
-- [ ] Additional worker tasks (priority, routing)
+- [x] Additional worker tasks — priority upgrade, spam detection, department
+  routing (heuristic stubs; all write audit events)
 
 ## License
 

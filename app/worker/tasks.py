@@ -6,8 +6,9 @@ from typing import Any
 
 from asgi_correlation_id import correlation_id as _correlation_id_var
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 
-from app.enums import EventType
+from app.enums import Category, EventType, Priority
 from app.models import Ticket, TicketEvent
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,272 @@ async def summarize_ticket(
         extra={
             "ticket_id": ticket_id,
             "summary_len": len(summary),
+            "elapsed_seconds": elapsed,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Priority heuristics
+# ---------------------------------------------------------------------------
+
+_PRIORITY_RANK: dict[Priority, int] = {
+    Priority.LOW: 0,
+    Priority.MEDIUM: 1,
+    Priority.HIGH: 2,
+    Priority.CRITICAL: 3,
+}
+
+_CRITICAL_KEYWORDS = (
+    "outage",
+    "down",
+    "critical",
+    "emergency",
+    "urgent",
+    "production",
+)
+_HIGH_KEYWORDS = (
+    "asap",
+    "important",
+    "major",
+    "severe",
+    "degraded",
+    "performance",
+)
+
+
+def _detect_priority(subject: str, description: str) -> Priority:
+    text = (subject + " " + description).lower()
+    if any(kw in text for kw in _CRITICAL_KEYWORDS):
+        return Priority.CRITICAL
+    if any(kw in text for kw in _HIGH_KEYWORDS):
+        return Priority.HIGH
+    return Priority.MEDIUM
+
+
+async def assign_priority(
+    ctx: dict[str, Any],
+    ticket_id: int,
+    correlation_id: str | None = None,
+) -> None:
+    """Upgrade ticket priority based on subject/description keyword heuristics.
+
+    Only upgrades — never downgrades what the customer submitted. If the
+    heuristic suggests a lower or equal priority, the task is a no-op.
+    Writes a PRIORITY_CHANGED event and updates Ticket.priority on upgrade.
+    """
+    _correlation_id_var.set(correlation_id)
+
+    start = time.monotonic()
+    logger.info("assign_priority: started", extra={"ticket_id": ticket_id})
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        ticket = await session.get(Ticket, ticket_id)
+
+        if ticket is None:
+            logger.warning(
+                "assign_priority: ticket not found, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+        computed = _detect_priority(ticket.subject, ticket.description)
+
+        if _PRIORITY_RANK[computed] <= _PRIORITY_RANK[ticket.priority]:
+            logger.info(
+                "assign_priority: no upgrade needed",
+                extra={
+                    "ticket_id": ticket_id,
+                    "current": ticket.priority.value,
+                    "computed": computed.value,
+                },
+            )
+            return
+
+        previous = ticket.priority
+        ticket.priority = computed
+        session.add(
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=EventType.PRIORITY_CHANGED,
+                field_changed="priority",
+                previous_value=previous.value,
+                new_value=computed.value,
+            )
+        )
+
+        try:
+            await session.commit()
+        except StaleDataError:
+            logger.warning(
+                "assign_priority: concurrent update, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+    elapsed = round(time.monotonic() - start, 3)
+    logger.info(
+        "assign_priority: complete",
+        extra={
+            "ticket_id": ticket_id,
+            "previous": previous.value,
+            "new_priority": computed.value,
+            "elapsed_seconds": elapsed,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Spam detection heuristics
+# ---------------------------------------------------------------------------
+
+_SPAM_PHRASES = (
+    "click here",
+    "free offer",
+    "you have won",
+    "congratulations",
+    "act now",
+    "limited time",
+    "buy now",
+    "make money",
+)
+_MAX_URLS = 2
+
+
+def _is_spam(subject: str, description: str) -> bool:
+    text = (subject + " " + description).lower()
+    url_count = text.count("http://") + text.count("https://")
+    if url_count > _MAX_URLS:
+        return True
+    return any(phrase in text for phrase in _SPAM_PHRASES)
+
+
+async def detect_spam(
+    ctx: dict[str, Any],
+    ticket_id: int,
+    correlation_id: str | None = None,
+) -> None:
+    """Flag potential spam tickets based on content heuristics.
+
+    Writes a SPAM_FLAGGED event when the ticket content triggers one or more
+    spam signals (known phrases, excessive URLs). No event is written for
+    clean tickets. Ticket status is not changed — a human reviews flagged
+    tickets.
+    """
+    _correlation_id_var.set(correlation_id)
+
+    start = time.monotonic()
+    logger.info("detect_spam: started", extra={"ticket_id": ticket_id})
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        ticket = await session.get(Ticket, ticket_id)
+
+        if ticket is None:
+            logger.warning(
+                "detect_spam: ticket not found, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+        flagged = _is_spam(ticket.subject, ticket.description)
+
+        if not flagged:
+            logger.info("detect_spam: clean", extra={"ticket_id": ticket_id})
+            return
+
+        try:
+            session.add(
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=EventType.SPAM_FLAGGED,
+                    field_changed="spam",
+                    new_value="true",
+                )
+            )
+            await session.commit()
+        except IntegrityError:
+            logger.warning(
+                "detect_spam: ticket deleted before event write, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+    elapsed = round(time.monotonic() - start, 3)
+    logger.info(
+        "detect_spam: flagged",
+        extra={"ticket_id": ticket_id, "elapsed_seconds": elapsed},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routing heuristics
+# ---------------------------------------------------------------------------
+
+_DEPARTMENT: dict[Category, str] = {
+    Category.BILLING: "billing",
+    Category.TECHNICAL: "technical-support",
+    Category.FEATURE_REQUEST: "product",
+    Category.OTHER: "general",
+}
+
+
+async def route_ticket(
+    ctx: dict[str, Any],
+    ticket_id: int,
+    correlation_id: str | None = None,
+) -> None:
+    """Route a ticket to the appropriate support department based on category.
+
+    Writes a ROUTED event recording the destination department. The mapping
+    is deterministic: category → department string. A ROUTED event is always
+    written (every ticket has a category).
+    """
+    _correlation_id_var.set(correlation_id)
+
+    start = time.monotonic()
+    logger.info("route_ticket: started", extra={"ticket_id": ticket_id})
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        ticket = await session.get(Ticket, ticket_id)
+
+        if ticket is None:
+            logger.warning(
+                "route_ticket: ticket not found, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+        department = _DEPARTMENT.get(ticket.category, "general")
+
+        try:
+            session.add(
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=EventType.ROUTED,
+                    field_changed="department",
+                    new_value=department,
+                )
+            )
+            await session.commit()
+        except IntegrityError:
+            logger.warning(
+                "route_ticket: ticket deleted before event write, skipping",
+                extra={"ticket_id": ticket_id},
+            )
+            return
+
+    elapsed = round(time.monotonic() - start, 3)
+    logger.info(
+        "route_ticket: complete",
+        extra={
+            "ticket_id": ticket_id,
+            "department": department,
             "elapsed_seconds": elapsed,
         },
     )

@@ -14,7 +14,12 @@ from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import setup_logging
 from app.worker.registry import initialize_backend
-from app.worker.tasks import summarize_ticket
+from app.worker.tasks import (
+    assign_priority,
+    detect_spam,
+    route_ticket,
+    summarize_ticket,
+)
 
 # Configure JSON logging at module level before arq starts any threads.
 setup_logging(settings.log_level)
@@ -39,7 +44,12 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
 class WorkerSettings:
     """arq worker configuration."""
 
-    functions = [arq.func(summarize_ticket, max_tries=1)]
+    functions = [
+        arq.func(summarize_ticket, max_tries=1),
+        arq.func(assign_priority, max_tries=1),
+        arq.func(detect_spam, max_tries=1),
+        arq.func(route_ticket, max_tries=1),
+    ]
     on_startup = on_startup
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
