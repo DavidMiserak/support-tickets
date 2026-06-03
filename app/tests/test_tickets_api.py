@@ -462,6 +462,32 @@ async def test_search_blank_q_returns_all(async_client):
 
 @pytest.mark.asyncio
 async def test_search_q_too_long_returns_422(async_client):
-    resp = await async_client.get(f"/tickets?q={'x' * 501}")
+    resp = await async_client.get(f"/tickets?q={'x' * 501}")  # noqa: E501
     assert resp.status_code == 422
     assert resp.json()["error_type"] == "validation_error"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_returns_429_with_standard_envelope(async_client, monkeypatch):
+    """POST /tickets enforces the per-IP rate limit and returns the standard
+    {detail, error_type} envelope on 429."""
+    import app.config as config_module
+
+    monkeypatch.setattr(config_module.settings, "rate_limit_create_ticket", "2/minute")
+
+    # First two requests succeed (limit is 2/minute).
+    for _ in range(2):
+        resp = await async_client.post("/tickets", json=VALID_TICKET)
+        assert resp.status_code == 201
+
+    # Third request is blocked; verify the standard error envelope.
+    resp = await async_client.post("/tickets", json=VALID_TICKET)
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["error_type"] == "rate_limit_exceeded"
+    assert "detail" in body

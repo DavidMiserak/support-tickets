@@ -162,10 +162,10 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   identity threaded through as `actor_id` on audit events. API-key middleware is
   a simpler alternative for server-to-server callers. Documented in README.
 
-- [ ] **Rate limiting.** `POST /tickets` is unbounded. Add per-IP or per-key
-  limits via `slowapi` (wraps `limits`/`redis`; integrates with FastAPI
-  middleware) or an upstream proxy (nginx, Traefik). Without Redis for state the
-  simplest option is a fixed-window in-process limiter.
+- [x] **Rate limiting.** `POST /tickets` rate-limited per IP via `slowapi`
+  (default `20/minute`, configurable via `RATE_LIMIT_CREATE_TICKET`). Returns
+  429 with the standard error envelope. In-memory storage — swap to
+  `limits.storage.RedisStorage` for multi-replica deployments.
 
 - [x] **Full-text search on `GET /tickets`.** `?q=` parameter searches subject
   and description via `websearch_to_tsquery`; GIN expression index in migration

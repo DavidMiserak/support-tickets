@@ -3,13 +3,15 @@
 from typing import Annotated, Any
 
 from arq.connections import ArqRedis
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arq_pool import get_arq_pool
+from app.config import settings
 from app.database import get_session
 from app.enums import Category, Priority, TicketStatus
+from app.rate_limit import limiter
 from app.repositories.ticket import TicketRepository
 from app.schemas import (
     AssignAgentRequest,
@@ -48,12 +50,16 @@ ServiceDep = Annotated[TicketService, Depends(get_ticket_service)]
     "",
     response_model=TicketResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=_UNPROCESSABLE,
+    responses={**_UNPROCESSABLE, 429: {"model": ErrorEnvelope}},
 )
+@limiter.limit(lambda: settings.rate_limit_create_ticket)  # type: ignore[untyped-decorator]
 async def create_ticket(
-    req: CreateTicketRequest, service: ServiceDep
+    request: Request, req: CreateTicketRequest, service: ServiceDep
 ) -> TicketResponse:
-    """Create a ticket."""
+    """Create a ticket.
+
+    Rate-limited to ``RATE_LIMIT_CREATE_TICKET`` per IP (default 20/minute).
+    """
     ticket = await service.create_ticket(req)
     return TicketResponse.model_validate(ticket)
 

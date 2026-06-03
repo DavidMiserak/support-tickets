@@ -79,6 +79,7 @@ SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
 | `DEBUG`               | Enable debug behavior                        | `false`                                                                |
 | `DB_POOL_SIZE`        | SQLAlchemy connection pool size per process  | `20`                                                                   |
 | `DB_MAX_OVERFLOW`     | Max connections above pool size per process  | `10`                                                                   |
+| `RATE_LIMIT_CREATE_TICKET` | Per-IP rate limit for `POST /tickets` (slowapi format) | `20/minute`                                               |
 
 ## API Documentation
 
