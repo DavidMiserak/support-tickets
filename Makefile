@@ -137,12 +137,14 @@ local-coverage: install-dev test-db
 container-test: test-db
 	$(COMPOSE) --profile test build test
 	$(COMPOSE) --profile test run --rm test
+	$(COMPOSE) down
 
 .PHONY: container-coverage
 container-coverage: test-db
 	$(COMPOSE) --profile test build test
 	$(COMPOSE) --profile test run --rm -v "$(PWD):/app" test \
 		sh -c "coverage erase && coverage run -m pytest app/tests -q && coverage report -m && coverage xml -o coverage.xml"
+	$(COMPOSE) down
 
 .PHONY: test
 test:

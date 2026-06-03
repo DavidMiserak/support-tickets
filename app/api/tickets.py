@@ -66,7 +66,7 @@ async def get_ticket(
     ticket_id: Annotated[int, Path(ge=1)], service: ServiceDep
 ) -> TicketDetailResponse:
     """Fetch a single ticket by id, including its full audit event history."""
-    ticket = await service.get_ticket(ticket_id)
+    ticket = await service.get_ticket_detail(ticket_id)
     return TicketDetailResponse.model_validate(ticket)
 
 

@@ -1,6 +1,7 @@
 """arq task definitions for the background worker."""
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -139,12 +140,22 @@ _HIGH_KEYWORDS = (
     "performance",
 )
 
+# Precompiled word-boundary patterns prevent false positives from substrings:
+# "down" won't match "download"/"markdown"; "production" won't match inside
+# "nonproduction". Patterns are built once at import time.
+_CRITICAL_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in _CRITICAL_KEYWORDS) + r")\b"
+)
+_HIGH_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in _HIGH_KEYWORDS) + r")\b"
+)
+
 
 def _detect_priority(subject: str, description: str) -> Priority:
     text = (subject + " " + description).lower()
-    if any(kw in text for kw in _CRITICAL_KEYWORDS):
+    if _CRITICAL_RE.search(text):
         return Priority.CRITICAL
-    if any(kw in text for kw in _HIGH_KEYWORDS):
+    if _HIGH_RE.search(text):
         return Priority.HIGH
     return Priority.MEDIUM
 
@@ -205,6 +216,7 @@ async def assign_priority(
         try:
             await session.commit()
         except StaleDataError:
+            await session.rollback()
             logger.warning(
                 "assign_priority: concurrent update, skipping",
                 extra={"ticket_id": ticket_id},
@@ -347,7 +359,7 @@ async def route_ticket(
             )
             return
 
-        department = _DEPARTMENT.get(ticket.category, "general")
+        department = _DEPARTMENT[ticket.category]
 
         try:
             session.add(

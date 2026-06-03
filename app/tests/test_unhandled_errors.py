@@ -14,7 +14,7 @@ async def test_unhandled_exception_returns_uniform_500_envelope(
         raise RuntimeError("super secret database password")
 
     monkeypatch.setattr(
-        "app.services.ticket.TicketService.get_ticket",
+        "app.services.ticket.TicketService.get_ticket_detail",
         boom,
     )
 
