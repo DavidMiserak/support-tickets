@@ -107,9 +107,10 @@ Deferred from Phase 4 (not an observability concept — ships as standalone PR).
   `all_ok = db_ok and redis_ok`; any Redis disruption returns 503 and the Docker
   HEALTHCHECK restarts the container even though Redis is optional for serving
   requests. Fix: either (a) decouple `/health` liveness from Redis and add a
-  separate `/ready` readiness probe that includes Redis, or (b) add
-  `--health-retries=5` and a longer `--health-interval` to the compose
-  HEALTHCHECK so a brief Redis blip doesn't trigger a restart. (Found by
+  separate `/ready` readiness probe that includes Redis, or (b) raise
+  `healthcheck.retries` and lengthen `healthcheck.interval` on the `api`
+  service in `compose.yaml` (same fields as `db`/`redis`) so a brief Redis
+  blip does not trigger a restart. (Found by
   adversarial review on feat/observability-4b.)
 - [ ] **X-Request-ID format inconsistency.** Server-generated IDs use `uuid4().hex`
   (32-char, no hyphens); client-supplied IDs are echoed verbatim in hyphenated

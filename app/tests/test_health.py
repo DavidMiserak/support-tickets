@@ -138,13 +138,14 @@ async def test_health_rejects_invalid_request_id(
 
     monkeypatch.setattr("app.main.check_database_connection", db_ok)
 
+    from asgi_correlation_id.middleware import is_valid_uuid4
+
     response = await async_client.get("/health", headers={"X-Request-ID": "not-a-uuid"})
     assert response.status_code == 200
     returned_id = response.headers.get("x-request-id", "")
     # The supplied invalid ID must not be echoed back.
     assert returned_id != "not-a-uuid"
-    # A fresh ID was generated.
-    assert len(returned_id) > 0
+    assert is_valid_uuid4(returned_id)
 
 
 @pytest.mark.asyncio
