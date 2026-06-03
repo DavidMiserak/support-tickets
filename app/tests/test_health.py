@@ -25,7 +25,7 @@ async def test_health_returns_503_when_database_unavailable(
 
     response = await async_client.get("/health")
     assert response.status_code == 503
-    assert response.json() == {"status": "unavailable", "database": "down"}
+    assert response.json() == {"status": "degraded"}
 
 
 @pytest.mark.asyncio

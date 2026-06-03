@@ -18,16 +18,18 @@ def reset_registry():
     registry_module._initialized_backend = None
 
 
-def test_registry_returns_noop_when_env_is_noop(monkeypatch):
-    """SUMMARIZER_BACKEND=noop selects NoopSummarizer."""
+def test_registry_selects_noop_when_settings_is_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """settings.summarizer_backend='noop' selects NoopSummarizer."""
     monkeypatch.setattr(settings, "summarizer_backend", "noop")
     backend = registry_module.initialize_backend()
     assert isinstance(backend, NoopSummarizer)
 
 
-def test_registry_defaults_to_noop_when_env_unset(monkeypatch):
-    """Unset SUMMARIZER_BACKEND defaults to noop."""
-    monkeypatch.setattr(settings, "summarizer_backend", "noop")
+def test_registry_uses_import_time_settings_default() -> None:
+    """initialize_backend() reads the import-time settings singleton (default noop)."""
+    assert settings.summarizer_backend == "noop"
     backend = registry_module.initialize_backend()
     assert isinstance(backend, NoopSummarizer)
 
