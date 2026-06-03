@@ -8,16 +8,6 @@ processing. Built with FastAPI, PostgreSQL, and SQLAlchemy (async).
 > Prometheus metrics, liveness/readiness probes — all running in a single
 > `make run`. Worker results are visible in `GET /tickets/{id}` under `events`.
 
-### For reviewers
-
-```bash
-make run && make review
-```
-
-`make review` is an alias for `make demo-api`: phases A (ticket API) → B
-(OpenAPI + errors) → C (async worker). Requires Docker/Podman, `curl`, and `jq`.
-Success ends with `All demo-api checks passed (phases A–C).`
-
 ## Overview
 
 The system lets customers create support tickets, agents update ticket status,
@@ -57,7 +47,7 @@ the containerized stack.
 cp .env.example .env     # adjust if needed
 make run                 # build and start all services (migrations run automatically)
 make health              # verify the API is up
-make review              # API + worker walkthrough (alias: make demo-api)
+make demo-api            # API + worker walkthrough (recommended for review)
 make seed                # optional: sample agents and tickets for manual exploration
 ```
 
@@ -113,11 +103,13 @@ OpenAPI surface, and live async worker results. It creates tickets via `POST`
 (no hardcoded ids), seeds **agents only** when a compose `api` container is
 available, and exits non-zero on the first failure.
 
-```bash
-make run && make review   # same as make demo-api
-```
+Diagrams below summarize architecture; behavioral proof is still
+`make demo-api`.
 
-Or step by step: `make run`, then `make demo-api` (agents-only seed + phases A–C).
+```bash
+make run          # API + Postgres + Redis + worker (required for full demo)
+make demo-api     # agents-only seed + demo phases A–C
+```
 
 - `make seed` — exploratory sample tickets with **static** audit events written
   at seed time (no queue). Useful for browsing the DB, not for proving workers.
@@ -143,6 +135,26 @@ old image — rebuild with `podman compose up -d --build --force-recreate api`
 | REST validation + errors | B — error envelopes | `404` / `409` / `422` envelopes |
 | Async queue + stored results | C | Fresh ticket id with `SUMMARIZED`, `PRIORITY_CHANGED`, `SPAM_FLAGGED`, `ROUTED`; `priority: CRITICAL` |
 | Assign agent (optional) | A — `[extra: assign]` | `ASSIGNED` event (demo extra; needs a seeded agent) |
+
+### Status lifecycle
+
+Allowed moves (simplified; source of truth:
+[`app/services/ticket.py`](app/services/ticket.py) `ALLOWED_TRANSITIONS`).
+Same-status `PATCH` is an idempotent no-op (no event). `CLOSED` is terminal.
+
+```mermaid
+stateDiagram-v2
+  [*] --> OPEN
+  OPEN --> IN_PROGRESS
+  OPEN --> RESOLVED
+  OPEN --> CLOSED
+  IN_PROGRESS --> RESOLVED
+  IN_PROGRESS --> OPEN
+  IN_PROGRESS --> CLOSED
+  RESOLVED --> CLOSED
+  RESOLVED --> IN_PROGRESS
+  CLOSED --> [*]
+```
 
 The curls below mirror what the script exercises (replace `{id}` with a real
 ticket id from `POST /tickets`):
@@ -202,6 +214,32 @@ background jobs that run asynchronously:
 - One job per ticket per task, deduped by ticket id at enqueue time
 - Ticket creation succeeds even if Redis is down or enqueue fails
 - Each job runs at most once (`max_tries=1`); failures are logged, not retried
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant Redis as Redis_arq
+  participant Worker
+  participant DB as Postgres
+
+  Client->>API: POST /tickets
+  API->>DB: insert ticket + CREATED event
+  API->>Redis: enqueue 4 jobs
+  API-->>Client: 201 OPEN
+
+  Worker->>Redis: dequeue jobs
+  Worker->>DB: read ticket / write events
+  Note over Worker,DB: SUMMARIZED PRIORITY_CHANGED SPAM_FLAGGED ROUTED
+
+  Client->>API: GET /tickets/id
+  API->>DB: load ticket + events
+  API-->>Client: 200 with events array
+```
+
+Simplified flow; enqueue details live in
+[`app/services/ticket.py`](app/services/ticket.py) and
+[`app/worker/tasks.py`](app/worker/tasks.py).
 
 Worker results are written to `ticket_events` and returned in
 `GET /tickets/{id}` under the `events` array (at most 100 events; when
@@ -378,8 +416,7 @@ event), so jobs do not hold a connection open during CPU-bound summarization.
 ```bash
 make help         # list all available targets
 make run          # build and start the stack
-make review       # alias for demo-api (phases A–C; agents-only seed in compose)
-make demo-api     # same as make review
+make demo-api     # runnable walkthrough (phases A–C; agents-only seed in compose)
 make health       # curl the /health liveness probe
 make migrate      # apply database migrations in the running container
 make install-ml   # optional: torch + transformers for local worker ML runs
