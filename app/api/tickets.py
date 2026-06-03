@@ -11,6 +11,7 @@ from app.arq_pool import get_arq_pool
 from app.config import settings
 from app.database import get_session
 from app.enums import Category, Priority, TicketStatus
+from app.models import Ticket, TicketEvent
 from app.rate_limit import limiter
 from app.repositories.ticket import TicketRepository
 from app.schemas import (
@@ -46,6 +47,20 @@ async def get_ticket_service(
 ServiceDep = Annotated[TicketService, Depends(get_ticket_service)]
 
 
+def _ticket_detail_response(
+    ticket: Ticket,
+    events: list[TicketEvent],
+    events_total: int,
+) -> TicketDetailResponse:
+    """Build a detail response from a ticket row and a preloaded event slice."""
+    return TicketDetailResponse(
+        **TicketResponse.model_validate(ticket).model_dump(),
+        events=[TicketEventResponse.model_validate(e) for e in events],
+        events_total=events_total,
+        events_truncated=events_total > len(events),
+    )
+
+
 @router.post(
     "",
     response_model=TicketResponse,
@@ -74,12 +89,7 @@ async def get_ticket(
 ) -> TicketDetailResponse:
     """Fetch a single ticket by id, including a bounded audit event history."""
     ticket, events, events_total = await service.get_ticket_detail(ticket_id)
-    return TicketDetailResponse(
-        **TicketResponse.model_validate(ticket).model_dump(),
-        events=[TicketEventResponse.model_validate(e) for e in events],
-        events_total=events_total,
-        events_truncated=events_total > len(events),
-    )
+    return _ticket_detail_response(ticket, events, events_total)
 
 
 @router.get(
@@ -121,29 +131,39 @@ async def list_tickets(
 
 @router.patch(
     "/{ticket_id}/status",
-    response_model=TicketResponse,
+    response_model=TicketDetailResponse,
     responses={**_NOT_FOUND, **_CONFLICT, **_UNPROCESSABLE},
 )
 async def update_status(
     ticket_id: Annotated[int, Path(ge=1)],
     req: UpdateStatusRequest,
     service: ServiceDep,
-) -> TicketResponse:
-    """Transition a ticket to a new status."""
-    ticket = await service.update_status(ticket_id, req.status)
-    return TicketResponse.model_validate(ticket)
+) -> TicketDetailResponse:
+    """Transition a ticket to a new status.
+
+    Returns the same detail shape as GET /tickets/{id}, including bounded
+    audit events (reload runs even for idempotent no-op transitions).
+    """
+    await service.update_status(ticket_id, req.status)
+    ticket, events, events_total = await service.get_ticket_detail(ticket_id)
+    return _ticket_detail_response(ticket, events, events_total)
 
 
 @router.patch(
     "/{ticket_id}/assign",
-    response_model=TicketResponse,
+    response_model=TicketDetailResponse,
     responses={**_NOT_FOUND, **_CONFLICT, **_UNPROCESSABLE},
 )
 async def assign_agent(
     ticket_id: Annotated[int, Path(ge=1)],
     req: AssignAgentRequest,
     service: ServiceDep,
-) -> TicketResponse:
-    """Assign a ticket to a support agent."""
-    ticket = await service.assign_agent(ticket_id, req.agent_id)
-    return TicketResponse.model_validate(ticket)
+) -> TicketDetailResponse:
+    """Assign a ticket to a support agent.
+
+    Returns the same detail shape as GET /tickets/{id}, including bounded
+    audit events (reload runs even when the agent is already assigned).
+    """
+    await service.assign_agent(ticket_id, req.agent_id)
+    ticket, events, events_total = await service.get_ticket_detail(ticket_id)
+    return _ticket_detail_response(ticket, events, events_total)

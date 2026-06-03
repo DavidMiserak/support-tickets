@@ -135,15 +135,13 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
 
 ## Deferred from Phase 7 (polish) review
 
-- [ ] **`PATCH /tickets/{id}/status` returns flat `TicketResponse` (no events).**
-  `GET /tickets/{id}` returns `TicketDetailResponse` with `events`. The asymmetry
-  is intentional to avoid a second DB query (selectinload) on every PATCH. To
-  fix: reload ticket with `selectinload(Ticket.events)` after commit in
-  `TicketService.update_status`, or add a `get_with_events` helper to the repo.
+- [x] **PATCH status/assign return `TicketDetailResponse`.** After write,
+  API reloads via `get_ticket_detail` so PATCH matches GET by id (bounded
+  `events`, including idempotent no-ops). Tradeoff: +2 queries per PATCH.
 
 - [x] **Assign-agent REST endpoint.** `PATCH /tickets/{id}/assign` sets
   `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
-  `ASSIGNED` event, returns `TicketResponse`.
+  `ASSIGNED` event, returns `TicketDetailResponse`.
 
 - [ ] **Makefile `container-up` exits silently on build failure.** If the build
   fails or a port is in use, `compose up --build -d` exits 0 with no visible

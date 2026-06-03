@@ -189,9 +189,10 @@ make demo-api   # includes worker checks when Redis is up (DEMO_WORKER=auto)
 The script polls until it sees `CREATED`, `SUMMARIZED`, `PRIORITY_CHANGED`,
 `SPAM_FLAGGED`, and `ROUTED`, and asserts priority was upgraded to `CRITICAL`.
 
-> **Note:** `POST /tickets` and `PATCH .../status` or `.../assign` return a flat
-> ticket object (no `events`). Call `GET /tickets/{id}` to see the audit event
-> history (bounded; see `events_truncated` when older rows are omitted).
+> **Note:** `POST /tickets` and `GET /tickets` (list) return a flat ticket object
+> (no `events`). `GET /tickets/{id}` and `PATCH .../status` or `.../assign` return
+> the same detail shape with bounded `events` (see `events_truncated` when older
+> rows are omitted).
 
 **Summarizer backend:**
 

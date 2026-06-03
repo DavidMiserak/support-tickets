@@ -251,14 +251,31 @@ async def test_get_ticket_invalid_id_returns_422(async_client):
 
 
 @pytest.mark.asyncio
-async def test_update_status_response_has_no_events_field(async_client):
-    """PATCH /tickets/{id}/status returns TicketResponse (no events field)."""
+async def test_update_status_response_includes_events(async_client):
+    """PATCH /tickets/{id}/status returns TicketDetailResponse with audit events."""
     created = await _create(async_client)
     resp = await async_client.patch(
         f"/tickets/{created['id']}/status", json={"status": "IN_PROGRESS"}
     )
     assert resp.status_code == 200
-    assert "events" not in resp.json()
+    body = resp.json()
+    assert "events" in body
+    event_types = [e["event_type"] for e in body["events"]]
+    assert "CREATED" in event_types
+    assert "STATUS_CHANGED" in event_types
+
+
+@pytest.mark.asyncio
+async def test_update_status_noop_still_returns_events(async_client):
+    """Idempotent status PATCH still returns bounded events (same shape as GET)."""
+    created = await _create(async_client)
+    resp = await async_client.patch(
+        f"/tickets/{created['id']}/status", json={"status": "OPEN"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["events"]) >= 1
+    assert body["events"][0]["event_type"] == "CREATED"
 
 
 @pytest.mark.asyncio
@@ -272,7 +289,9 @@ async def test_assign_agent_returns_200(
     assert resp.status_code == 200
     body = resp.json()
     assert body["assigned_agent_id"] == test_agent
-    assert "events" not in body
+    assert "events" in body
+    event_types = [e["event_type"] for e in body["events"]]
+    assert "ASSIGNED" in event_types
 
 
 @pytest.mark.asyncio
