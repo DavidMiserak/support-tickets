@@ -49,6 +49,11 @@ services:
         # waits for the API to be healthy before starting so migrations are
         # guaranteed to be applied before any job processing begins.
         command: python -m arq app.worker.main.WorkerSettings
+        # Worker Prometheus metrics (separate process from the API). Scrape
+        # http://localhost:9091/metrics for job counts, durations, and the
+        # active summarizer backend.
+        ports:
+            - "9091:9091"
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379
