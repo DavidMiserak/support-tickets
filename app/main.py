@@ -1,10 +1,12 @@
 """FastAPI application."""
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated
 from urllib.parse import urlparse, urlunparse
+from uuid import uuid4
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
@@ -94,7 +96,11 @@ app = FastAPI(
 # middleware added FIRST here is the OUTERMOST (first to handle the request).
 # CorrelationIdMiddleware must be outermost so the request ID is set before
 # the Prometheus instrumentator records the request.
-app.add_middleware(CorrelationIdMiddleware, validator=is_valid_uuid4)
+app.add_middleware(
+    CorrelationIdMiddleware,
+    generator=lambda: str(uuid4()),
+    validator=is_valid_uuid4,
+)
 
 # HTTP metrics: request count, latency histogram, in-flight gauge.
 # expose() registers GET /metrics on the default prometheus_client registry,
@@ -162,7 +168,16 @@ async def root() -> RedirectResponse:
 
 
 async def _check_redis(pool: ArqRedis | None) -> bool:
-    """Return True if Redis accepts a ping, False otherwise."""
+    """Return True if Redis accepts a ping, False otherwise.
+
+    Redis is optional for ticket CRUD — only needed to enqueue background
+    summarization. Callers should treat False as a soft degraded signal, not
+    a reason to restart the container.
+
+    asyncio.CancelledError is NOT caught here (it's BaseException, not
+    Exception) and propagates up to the caller, which is the correct behavior
+    when the request task is cancelled mid-flight.
+    """
     if pool is None:
         return False
     try:
@@ -174,12 +189,43 @@ async def _check_redis(pool: ArqRedis | None) -> bool:
 
 
 @app.get("/health", tags=["health"])
-async def health(
+async def health() -> JSONResponse:
+    """Liveness probe: the process is alive. Used by Docker HEALTHCHECK.
+
+    Returns 200 unconditionally — no I/O, no network calls. A container should
+    only be restarted when the process itself is stuck, not when a dependency
+    is briefly unavailable.
+    """
+    return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ok"})
+
+
+_READINESS_PROBE_TIMEOUT: float = 2.0
+
+
+@app.get("/ready", tags=["health"])
+async def ready(
     arq_pool: Annotated[ArqRedis | None, Depends(get_arq_pool)],
 ) -> JSONResponse:
-    """Liveness/readiness: process is up, Postgres accepts queries, Redis pings."""
-    db_ok = await check_database_connection()
-    redis_ok = await _check_redis(arq_pool)
+    """Readiness probe: Postgres and Redis are both reachable.
+
+    Returns 503 when either dependency is down or slow. Load balancers should
+    route traffic away on 503; the container is not restarted.
+    """
+    try:
+        db_ok = await asyncio.wait_for(
+            check_database_connection(), timeout=_READINESS_PROBE_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        db_ok = False
+        logger.warning("database readiness probe timed out")
+
+    try:
+        redis_ok = await asyncio.wait_for(
+            _check_redis(arq_pool), timeout=_READINESS_PROBE_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        redis_ok = False
+        logger.warning("redis readiness probe timed out")
 
     all_ok = db_ok and redis_ok
     return JSONResponse(

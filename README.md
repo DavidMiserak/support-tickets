@@ -242,17 +242,36 @@ Custom business counters:
    — find the `POST /tickets` that created it and its latency.
 4. `curl http://localhost:8000/metrics | grep ticket_summarization_outcomes`
    — check outcome counters to see how many jobs are failing vs. succeeding.
-5. `curl http://localhost:8000/health`
+5. `curl http://localhost:8000/ready`
    — if `"redis": "unavailable"`, the worker never received the job.
 
-### Health endpoint
+### Health endpoints
 
-`GET /health` probes both Postgres and Redis and returns per-component status:
+The API exposes two separate probes — a standard pattern for containerised services:
 
-```json
-{"status": "ok",      "database": "ok",          "redis": "ok"}
-{"status": "degraded","database": "unavailable",  "redis": "ok"}
-{"status": "degraded","database": "ok",           "redis": "unavailable"}
+**`GET /health` — liveness probe**
+
+Returns 200 unconditionally. No network calls, no dependency checks. The Docker
+`HEALTHCHECK` in `Containerfile` targets this endpoint so a Redis or Postgres
+blip never restarts the container.
+
+```bash
+curl http://localhost:8000/health
+# {"status": "ok"}
+make health   # same — targets liveness only
+```
+
+**`GET /ready` — readiness probe**
+
+Probes both Postgres and Redis (each with a 2-second timeout). Returns 200 when
+both are healthy; 503 when either is degraded. Use this for load-balancer health
+checks so traffic is held back when a dependency is temporarily unreachable.
+
+```bash
+curl http://localhost:8000/ready
+# {"status": "ok",      "database": "ok",         "redis": "ok"}
+# {"status": "degraded","database": "unavailable", "redis": "ok"}
+# {"status": "degraded","database": "ok",          "redis": "unavailable"}
 ```
 
 HTTP 200 when both components are healthy; 503 when either is degraded.
@@ -272,7 +291,7 @@ Tests run against an isolated `ticketsupport_test` database.
 ```bash
 make help         # list all available targets
 make run          # build and start the stack
-make health       # curl the /health endpoint
+make health       # curl the /health liveness probe
 make migrate      # apply database migrations in the running container
 make install-ml   # optional: torch + transformers for local worker ML runs
 make clean        # remove caches and build artifacts
@@ -286,6 +305,8 @@ make clean        # remove caches and build artifacts
 - [x] Background worker — summarize-at-create, best-effort once
   (arq + pluggable backends)
 - [x] Structured JSON logging, Prometheus metrics, correlation IDs
+- [x] Observability hardening: liveness/readiness split, UUID4 correlation
+  IDs, probe timeouts
 - [ ] Assign-agent endpoint + seed data script
 - [ ] Additional worker tasks (priority, routing)
 

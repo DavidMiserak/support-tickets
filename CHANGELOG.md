@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-03
+
 ### Added
 
 - Structured JSON logging via `python-json-logger` with `timestamp`,
@@ -20,10 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Business counters: `tickets_created_total`,
   `ticket_status_transitions_total`,
   `ticket_summarization_outcomes_total`
-- Redis health probe in `GET /health`; response now includes
-  `"redis": "ok" | "unavailable"`
 - `elapsed_seconds` field in worker task complete/failure log lines
 - Observability quickstart section in README with copy-paste curl examples
+- `GET /ready` readiness probe — Postgres and Redis checks with a
+  2-second timeout per probe; response body `{"status": "ok" |
+  "degraded", "database": "ok" | "unavailable", "redis": "ok" |
+  "unavailable"}` with HTTP 200 when both dependencies are reachable
+  and 503 otherwise
 
 ### Changed
 
@@ -33,8 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Correlation ID passed as an explicit arq job argument (contextvars do not
   survive the Redis queue boundary); always reset in worker to prevent stale
   ID leakage across jobs
-- `GET /health` response extended:
-  `{"status": ..., "database": ..., "redis": ...}`
+- `GET /health` is now a pure liveness probe — returns `{"status": "ok"}`
+  200 unconditionally with no I/O; dependency checks moved to `GET /ready`
+- `X-Request-ID` server-generated values now use hyphenated UUID4 format
+  (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) matching client-supplied IDs;
+  previously the default generator produced 32-char no-hyphen hex strings
 
 ### Fixed
 
@@ -46,3 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   matching the intent of the original plan decision
 - Test isolation: root logger handlers restored after logging-config tests so
   `caplog`-based tests that follow are not silently broken
+- Docker HEALTHCHECK on `api` targets `GET /health` (liveness only); dependency
+  status (`database`, `redis`) is reported by `GET /ready`, so a Redis blip no
+  longer triggers container restarts
