@@ -128,6 +128,10 @@ curl -s http://localhost:8000/tickets/{id}
 # List with filters + pagination (200). Returns {items, total, skip, limit}.
 curl -s 'http://localhost:8000/tickets?status=OPEN&priority=MEDIUM&category=TECHNICAL&skip=0&limit=20'
 
+# Full-text search across subject + description (200). Combines with filters.
+curl -s 'http://localhost:8000/tickets?q=password+reset'
+curl -s 'http://localhost:8000/tickets?q="two factor"&status=OPEN'
+
 # Transition status (200). Illegal moves return 409; CLOSED is terminal.
 curl -s -X PATCH http://localhost:8000/tickets/{id}/status \
   -H 'Content-Type: application/json' \

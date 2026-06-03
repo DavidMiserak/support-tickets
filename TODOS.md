@@ -167,10 +167,9 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   middleware) or an upstream proxy (nginx, Traefik). Without Redis for state the
   simplest option is a fixed-window in-process limiter.
 
-- [ ] **Full-text search on `GET /tickets`.** The list endpoint filters by
-  status/priority/category but not subject or description. Options: PostgreSQL
-  `tsvector`/`tsquery` (add a generated column + GIN index in a migration) or
-  `ILIKE` as a quick approximation. Neither requires a new service.
+- [x] **Full-text search on `GET /tickets`.** `?q=` parameter searches subject
+  and description via `websearch_to_tsquery`; GIN expression index in migration
+  0006. Combines freely with status/priority/category filters.
 
 - [ ] **Migration locking.** Migrations 0004 and 0005 use `DROP CONSTRAINT` +
   `ADD CONSTRAINT CHECK` on `ticket_events`, which takes `ACCESS EXCLUSIVE` for
