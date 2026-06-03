@@ -16,3 +16,7 @@ logs
 dist
 build
 *.log
+# Exclude local environment files so credentials are never baked into images.
+.env
+.env.*
+*.env
