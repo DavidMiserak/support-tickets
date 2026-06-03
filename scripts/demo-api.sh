@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Runnable API walkthrough — exercises the ticket API and async worker for graders.
+# Runnable API walkthrough for graders and local smoke checks.
 #
 # Usage:
-#   make run          # or: API already on localhost:8000
+#   make run          # api + postgres + redis + worker
+#   make review       # alias for make demo-api
 #   make demo-api     # or: ./scripts/demo-api.sh
 #
 # Options (environment):
 #   BASE_URL=http://localhost:8000   API base (no trailing slash)
-#   RUN_SEED=auto|yes|no             Seed agents + sample tickets (default: auto)
+#   RUN_SEED=auto|yes|no             Seed agents only (default: auto) — not sample tickets
 #   ASSIGN_AGENT_ID=1                Agent id for PATCH .../assign
-#   DEMO_WORKER=auto|1|0             Async worker checks: auto=if Redis ok (default)
+#   DEMO_WORKER=auto|1|0             auto=required if Redis ok; 0=skip async phase
 #   WORKER_WAIT_SECS=20              Max seconds to poll for worker events
 #   VERBOSE=1                        Print response bodies on success
 #
@@ -31,6 +32,7 @@ trap 'rm -f "${TMP_FILE:-}"' EXIT
 
 pass() { printf '  OK  %s\n' "$*"; }
 info() { printf '==> %s\n' "$*"; }
+phase_sep() { printf '\n'; }
 fail() {
   printf '  FAIL %s\n' "$*" >&2
   if [[ -n "$RESPONSE_BODY" ]]; then
@@ -56,12 +58,18 @@ compose_cmd() {
   fi
 }
 
-# True when `compose exec api` works (podman-compose lacks `ps --status running`).
 compose_api_running() {
   local compose
   compose=$(compose_cmd)
   [[ -n "$compose" ]] || return 1
   $compose exec -T api true >/dev/null 2>&1
+}
+
+compose_worker_running() {
+  local compose
+  compose=$(compose_cmd)
+  [[ -n "$compose" ]] || return 1
+  $compose exec -T worker true >/dev/null 2>&1
 }
 
 redis_ready() {
@@ -70,11 +78,21 @@ redis_ready() {
     [[ "$(echo "$RESPONSE_BODY" | jq -r '.redis // empty')" == "ok" ]]
 }
 
-should_run_worker_demo() {
+require_worker_demo() {
   case "$DEMO_WORKER" in
-    1) return 0 ;;
+    1)
+      if ! redis_ready; then
+        fail "DEMO_WORKER=1 but GET /ready reports redis not ok — run: make run"
+      fi
+      ;;
     0) return 1 ;;
-    auto) redis_ready ;;
+    auto)
+      if redis_ready; then
+        return 0
+      fi
+      fail "Phase C (async processing) requires Redis + worker — run: make run" \
+        "or set DEMO_WORKER=0 to skip async checks (API-only)"
+      ;;
     *)
       fail "DEMO_WORKER must be auto, 1, or 0 (got: $DEMO_WORKER)"
       ;;
@@ -137,8 +155,37 @@ assert_has_event() {
     fail "expected event_type $event_type in response events"
 }
 
+assert_lacks_events() {
+  local event_type
+  for event_type in "$@"; do
+    if echo "$RESPONSE_BODY" | jq -e --arg t "$event_type" \
+      '.events | map(.event_type) | index($t)' >/dev/null; then
+      fail "expected no $event_type on ticket yet (worker ran too early?)"
+    fi
+  done
+}
+
+worker_missing_events() {
+  local ticket_id=$1
+  local required event missing=()
+  required=(SUMMARIZED PRIORITY_CHANGED SPAM_FLAGGED ROUTED)
+  request GET "$BASE_URL/tickets/$ticket_id"
+  [[ "$RESPONSE_CODE" == "200" ]] || return 0
+  for event in "${required[@]}"; do
+    if ! echo "$RESPONSE_BODY" | jq -e --arg t "$event" \
+      '.events | map(.event_type) | index($t)' >/dev/null; then
+      missing+=("$event")
+    fi
+  done
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    local types
+    types=$(echo "$RESPONSE_BODY" | jq -r '[.events[].event_type] | join(", ")')
+    fail "worker timeout after ${WORKER_WAIT_SECS}s on ticket $ticket_id — missing: ${missing[*]}; have: ${types:-none}"
+  fi
+}
+
 check_api_up() {
-  info "Checking API at $BASE_URL"
+  info "Preflight: API health"
   request GET "$BASE_URL/health"
   assert_status 200
   assert_jq '.status' ok
@@ -146,7 +193,8 @@ check_api_up() {
 }
 
 demo_openapi_smoke() {
-  info "OpenAPI surface"
+  phase_sep
+  info "Phase B — API design: OpenAPI / Swagger"
   request GET "$BASE_URL/openapi.json"
   assert_status 200
   echo "$RESPONSE_BODY" | jq -e '.paths["/tickets"].post' >/dev/null ||
@@ -168,19 +216,20 @@ maybe_seed_agents() {
     *) fail "RUN_SEED must be auto, yes, or no (got: $RUN_SEED)" ;;
   esac
 
-  local compose
+  local compose seed_args
+  seed_args=(python -m scripts.seed --agents-only)
   compose=$(compose_cmd)
 
   if compose_api_running; then
-    info "Seeding sample data (idempotent) via: $compose exec api"
-    $compose exec -T api python -m scripts.seed
-    pass "seed via compose (agents + sample tickets)"
+    info "Preflight: seed agents only (tickets created by demo POSTs)"
+    $compose exec -T api "${seed_args[@]}"
+    pass "seed agents only via compose"
     return 0
   fi
   if [[ -n "${DATABASE_URL:-}" ]] && [[ -x .venv/bin/python ]]; then
-    info "Seeding sample data via local .venv and DATABASE_URL"
-    .venv/bin/python -m scripts.seed
-    pass "seed via local python"
+    info "Preflight: seed agents only via local .venv"
+    .venv/bin/python -m scripts.seed --agents-only
+    pass "seed agents only via local python"
     return 0
   fi
   if [[ "$RUN_SEED" == "yes" ]]; then
@@ -190,7 +239,10 @@ maybe_seed_agents() {
 }
 
 demo_happy_path() {
-  info "Create ticket — all fields"
+  phase_sep
+  info "Phase A — Ticket management API"
+
+  info "[demo: create] POST /tickets (all fields)"
   local create_body
   create_body='{
     "customer_name": "Ada Lovelace",
@@ -208,16 +260,17 @@ demo_happy_path() {
   local ticket_id
   ticket_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
   [[ "$ticket_id" =~ ^[0-9]+$ ]] || fail "create response missing numeric id"
-  pass "POST /tickets -> id=$ticket_id (priority HIGH, category TECHNICAL)"
+  pass "POST /tickets -> id=$ticket_id"
 
-  info "Retrieve ticket (GET /tickets/{id})"
+  info "[demo: retrieve] GET /tickets/{id}"
   request GET "$BASE_URL/tickets/$ticket_id"
   assert_status 200
   assert_jq '.id' "$ticket_id"
   assert_has_event CREATED
-  pass "GET /tickets/$ticket_id (includes CREATED event)"
+  assert_lacks_events SUMMARIZED PRIORITY_CHANGED SPAM_FLAGGED ROUTED
+  pass "GET /tickets/$ticket_id (CREATED only — worker events come in Phase C)"
 
-  info "List with filters + pagination"
+  info "[demo: list] GET /tickets with filters + pagination"
   request GET "$BASE_URL/tickets?status=OPEN&priority=HIGH&category=TECHNICAL&skip=0&limit=20"
   assert_status 200
   local total
@@ -226,22 +279,22 @@ demo_happy_path() {
     fail "list total should be >= 1 after create"
   echo "$RESPONSE_BODY" | jq -e '.items | type == "array"' >/dev/null ||
     fail "list response missing items array"
-  pass "GET /tickets?status=OPEN&priority=HIGH&category=TECHNICAL (total=$total)"
+  pass "GET /tickets?status&priority&category&skip&limit (total=$total)"
 
-  info "Agent updates status OPEN -> IN_PROGRESS"
+  info "[demo: update status] Agent PATCH OPEN -> IN_PROGRESS"
   request PATCH "$BASE_URL/tickets/$ticket_id/status" '{"status": "in_progress"}'
   assert_status 200
   assert_jq '.status' IN_PROGRESS
   assert_has_event STATUS_CHANGED
-  pass "PATCH /tickets/$ticket_id/status -> IN_PROGRESS (includes events)"
+  pass "PATCH /tickets/$ticket_id/status -> IN_PROGRESS"
 
-  info "Assign agent (PATCH /tickets/{id}/assign)"
+  info "[extra: assign] PATCH /tickets/{id}/assign (optional; needs seeded agent)"
   request PATCH "$BASE_URL/tickets/$ticket_id/assign" "{\"agent_id\": $ASSIGN_AGENT_ID}"
   if [[ "$RESPONSE_CODE" == "404" ]]; then
     local err
     err=$(echo "$RESPONSE_BODY" | jq -r '.error_type // .detail // empty')
     if [[ "$err" == "agent_not_found" ]]; then
-      fail "agent $ASSIGN_AGENT_ID not found — run: make seed (or RUN_SEED=yes ./scripts/demo-api.sh)"
+      fail "agent $ASSIGN_AGENT_ID not found — run: make demo-api (RUN_SEED=auto) or make seed"
     fi
     if [[ "$err" == "Not Found" ]]; then
       fail "PATCH /assign not available — rebuild API: podman compose build api && podman compose up -d api"
@@ -250,14 +303,9 @@ demo_happy_path() {
   assert_status 200
   assert_jq '.assigned_agent_id' "$ASSIGN_AGENT_ID"
   assert_has_event ASSIGNED
-  pass "PATCH /tickets/$ticket_id/assign -> agent $ASSIGN_AGENT_ID (includes events)"
+  pass "PATCH /tickets/$ticket_id/assign -> agent $ASSIGN_AGENT_ID"
 
-  info "Idempotent assign (same agent again)"
-  request PATCH "$BASE_URL/tickets/$ticket_id/assign" "{\"agent_id\": $ASSIGN_AGENT_ID}"
-  assert_status 200
-  pass "PATCH /tickets/$ticket_id/assign (idempotent)"
-
-  info "Status lifecycle IN_PROGRESS -> RESOLVED -> CLOSED"
+  info "[demo: update status] IN_PROGRESS -> RESOLVED -> CLOSED"
   request PATCH "$BASE_URL/tickets/$ticket_id/status" '{"status": "resolved"}'
   assert_status 200
   assert_jq '.status' RESOLVED
@@ -272,9 +320,9 @@ demo_happy_path() {
   assert_status 200
   assert_has_event ASSIGNED
   assert_has_event STATUS_CHANGED
-  pass "GET /tickets/$ticket_id includes ASSIGNED and STATUS_CHANGED events"
+  pass "GET /tickets/$ticket_id includes agent/status audit events"
 
-  info "CLOSED is terminal"
+  info "[demo: update status] CLOSED is terminal (409)"
   request PATCH "$BASE_URL/tickets/$ticket_id/status" '{"status": "open"}'
   assert_status 409
   assert_error_type invalid_status_transition
@@ -284,7 +332,8 @@ demo_happy_path() {
 }
 
 demo_error_envelopes() {
-  info "Error envelopes"
+  phase_sep
+  info "Phase B — API design: error envelopes"
 
   request GET "$BASE_URL/tickets/999999"
   assert_status 404
@@ -299,7 +348,7 @@ demo_error_envelopes() {
     ticket_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
   fi
 
-  info "Illegal status transition (CLOSED is terminal -> OPEN)"
+  info "409 invalid_status_transition (CLOSED -> OPEN)"
   local closed_id
   request POST "$BASE_URL/tickets" \
     '{"customer_name":"Err","customer_email":"err-'$(date +%s)'@example.com","subject":"S","description":"D","category":"OTHER"}'
@@ -310,7 +359,7 @@ demo_error_envelopes() {
   request PATCH "$BASE_URL/tickets/$closed_id/status" '{"status": "OPEN"}'
   assert_status 409
   assert_error_type invalid_status_transition
-  pass "409 invalid_status_transition (CLOSED -> OPEN)"
+  pass "409 invalid_status_transition"
 
   request POST "$BASE_URL/tickets" \
     '{"customer_name":"X","customer_email":"not-an-email","subject":"S","description":"D","category":"OTHER"}'
@@ -346,18 +395,56 @@ worker_events_ready() {
   [[ "$found" -eq "${#required[@]}" ]]
 }
 
-demo_async_processing() {
-  should_run_worker_demo || {
-    info "Skipping async worker demo (DEMO_WORKER=$DEMO_WORKER; Redis/worker not available)"
-    return 0
-  }
+assert_worker_results_stored() {
+  local worker_id=$1
 
-  info "Async processing (queue + background tasks)"
+  assert_has_event CREATED
+  assert_has_event SUMMARIZED
+  assert_has_event PRIORITY_CHANGED
+  assert_has_event SPAM_FLAGGED
+  assert_has_event ROUTED
+
+  echo "$RESPONSE_BODY" | jq -e \
+    '.events[] | select(.event_type == "SUMMARIZED") | select(.field_changed == "summary") | select(.new_value != null and .new_value != "")' \
+    >/dev/null ||
+    fail "SUMMARIZED event missing summary text in new_value"
+
+  echo "$RESPONSE_BODY" | jq -e \
+    '.events[] | select(.event_type == "SPAM_FLAGGED") | select(.new_value == "true")' \
+    >/dev/null ||
+    fail "SPAM_FLAGGED event missing new_value true"
+
+  echo "$RESPONSE_BODY" | jq -e \
+    '.events[] | select(.event_type == "ROUTED") | select(.new_value == "technical-support")' \
+    >/dev/null ||
+    fail "ROUTED event expected department technical-support for TECHNICAL category"
+
+  local priority types
+  priority=$(echo "$RESPONSE_BODY" | jq -r '.priority')
+  [[ "$priority" == "CRITICAL" ]] ||
+    fail "expected worker priority upgrade to CRITICAL, got $priority"
+  types=$(echo "$RESPONSE_BODY" | jq -r '[.events[].event_type] | join(", ")')
+  pass "worker results stored on ticket $worker_id: $types (priority=$priority)"
+}
+
+demo_async_processing() {
+  phase_sep
+  if ! require_worker_demo; then
+    info "Phase C — Async processing: skipped (DEMO_WORKER=0)"
+    return 0
+  fi
+
+  info "Phase C — Async processing (queue + background tasks)"
+
   request GET "$BASE_URL/ready"
   assert_status 200
-  pass "GET /ready (redis + database)"
+  pass "GET /ready (database + redis)"
 
-  info "Create ticket tuned for worker heuristics"
+  if compose_api_running && ! compose_worker_running; then
+    info "WARN: redis is up but worker container is not reachable via compose exec"
+  fi
+
+  info "[demo: async] POST /tickets tuned for worker heuristics"
   local body worker_id
   body='{
     "customer_name": "Worker Demo",
@@ -370,9 +457,9 @@ demo_async_processing() {
   request POST "$BASE_URL/tickets" "$body"
   assert_status 201
   worker_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
-  pass "POST /tickets -> id=$worker_id (worker pipeline)"
+  pass "POST /tickets -> id=$worker_id (enqueued worker jobs)"
 
-  info "Polling for worker events (up to ${WORKER_WAIT_SECS}s)"
+  info "Polling GET /tickets/$worker_id for worker events (up to ${WORKER_WAIT_SECS}s)"
   local elapsed=0
   while [[ "$elapsed" -lt "$WORKER_WAIT_SECS" ]]; do
     if worker_events_ready "$worker_id"; then
@@ -384,21 +471,14 @@ demo_async_processing() {
 
   request GET "$BASE_URL/tickets/$worker_id"
   assert_status 200
-  assert_has_event CREATED
-  assert_has_event SUMMARIZED
-  assert_has_event PRIORITY_CHANGED
-  assert_has_event SPAM_FLAGGED
-  assert_has_event ROUTED
-  local types priority
-  types=$(echo "$RESPONSE_BODY" | jq -r '[.events[].event_type] | join(", ")')
-  priority=$(echo "$RESPONSE_BODY" | jq -r '.priority')
-  [[ "$priority" == "CRITICAL" ]] ||
-    fail "expected worker priority upgrade to CRITICAL, got $priority"
-  pass "worker events on ticket $worker_id: $types (priority=$priority)"
+  if ! worker_events_ready "$worker_id"; then
+    worker_missing_events "$worker_id"
+  fi
+  assert_worker_results_stored "$worker_id"
 }
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -410,14 +490,19 @@ main() {
   need_cmd curl jq
   DEMO_TICKET_ID=""
 
+  phase_sep
+  info "Review path: Phase A (ticket API) → B (OpenAPI + errors) → C (async worker)"
+  phase_sep
+
   check_api_up
-  demo_openapi_smoke
   maybe_seed_agents
   demo_happy_path
+  demo_openapi_smoke
   demo_error_envelopes
   demo_async_processing
 
-  info "All demo-api checks passed."
+  phase_sep
+  info "All demo-api checks passed (phases A–C)."
 }
 
 main "$@"

@@ -2,15 +2,19 @@
 
 Run via: make seed   or   python -m scripts.seed
 
+``--agents-only`` seeds support agents only (used by ``make demo-api`` so worker
+events on demo tickets always come from the live queue, not static seed rows).
+
 Idempotent: skips rows that already exist (agents by email, tickets by email+subject).
 Safe to re-run after ``make migrate`` or on a fresh database.
 
-Does not enqueue arq jobs — audit events are written directly so ``GET /tickets/{id}``
-is useful immediately without waiting for the worker.
+Full seed does not enqueue arq jobs — audit events on sample tickets are written
+directly so ``GET /tickets/{id}`` is useful immediately without waiting for the worker.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
@@ -275,21 +279,41 @@ async def seed_tickets() -> int:
     return created
 
 
-async def run_seed() -> tuple[int, int]:
-    """Seed agents then tickets."""
+async def run_seed(*, agents_only: bool = False) -> tuple[int, int]:
+    """Seed agents and optionally sample tickets."""
     agents_created = await seed_agents()
+    if agents_only:
+        return agents_created, 0
     tickets_created = await seed_tickets()
     return agents_created, tickets_created
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Seed agents and sample tickets.")
+    parser.add_argument(
+        "--agents-only",
+        action="store_true",
+        help="seed agents only; skip sample tickets (for make demo-api)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     try:
-        agents_created, tickets_created = asyncio.run(run_seed())
+        agents_created, tickets_created = asyncio.run(
+            run_seed(agents_only=args.agents_only)
+        )
     except Exception as exc:
         print(f"seed failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
-    print(f"done ({agents_created} agent(s), {tickets_created} ticket(s) created)")
+    if args.agents_only:
+        print(
+            f"done ({agents_created} agent(s) created, tickets skipped — agents-only)"
+        )
+    else:
+        print(f"done ({agents_created} agent(s), {tickets_created} ticket(s) created)")
 
 
 if __name__ == "__main__":

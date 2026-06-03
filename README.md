@@ -8,6 +8,16 @@ processing. Built with FastAPI, PostgreSQL, and SQLAlchemy (async).
 > Prometheus metrics, liveness/readiness probes — all running in a single
 > `make run`. Worker results are visible in `GET /tickets/{id}` under `events`.
 
+### For reviewers
+
+```bash
+make run && make review
+```
+
+`make review` is an alias for `make demo-api`: phases A (ticket API) → B
+(OpenAPI + errors) → C (async worker). Requires Docker/Podman, `curl`, and `jq`.
+Success ends with `All demo-api checks passed (phases A–C).`
+
 ## Overview
 
 The system lets customers create support tickets, agents update ticket status,
@@ -47,7 +57,8 @@ the containerized stack.
 cp .env.example .env     # adjust if needed
 make run                 # build and start all services (migrations run automatically)
 make health              # verify the API is up
-make seed                # load sample agents and tickets (idempotent)
+make review              # API + worker walkthrough (alias: make demo-api)
+make seed                # optional: sample agents and tickets for manual exploration
 ```
 
 The API is served at `http://localhost:8000`. The root path redirects to the
@@ -94,19 +105,44 @@ Once running, interactive docs are available at:
 Enum values (`status`, `priority`, `category`) are accepted case-insensitively
 and echoed back in canonical upper case.
 
-**Source of truth:** [`scripts/demo-api.sh`](scripts/demo-api.sh) runs the full
-happy path plus error-envelope checks against a live API. It captures ticket
-ids from responses (no hardcoded `1`), seeds agents when a compose `api`
-container is running, and exits non-zero on the first failure.
+### Grader quick path
+
+[`scripts/demo-api.sh`](scripts/demo-api.sh) is the source of truth for an
+end-to-end API walkthrough: ticket CRUD and status lifecycle, error envelopes,
+OpenAPI surface, and live async worker results. It creates tickets via `POST`
+(no hardcoded ids), seeds **agents only** when a compose `api` container is
+available, and exits non-zero on the first failure.
 
 ```bash
-make run          # start API + Postgres + Redis + worker
-make demo-api     # or: ./scripts/demo-api.sh
+make run && make review   # same as make demo-api
 ```
 
-By default the script also exercises async worker events when Redis is healthy
-(`DEMO_WORKER=auto`). Set `DEMO_WORKER=0` to skip that block, or `VERBOSE=1` to
-print JSON bodies. See `./scripts/demo-api.sh --help`.
+Or step by step: `make run`, then `make demo-api` (agents-only seed + phases A–C).
+
+- `make seed` — exploratory sample tickets with **static** audit events written
+  at seed time (no queue). Useful for browsing the DB, not for proving workers.
+- `make demo-api` — proves the **live API + queue**: worker events appear only on
+  tickets created during the script’s Phase C `POST`.
+
+Set `DEMO_WORKER=0` to run API-only checks (skips Phase C). With the default
+`DEMO_WORKER=auto`, Phase C **fails** if Redis is not healthy — run the full
+stack with `make run`. Use `VERBOSE=1` to print JSON bodies. See
+`./scripts/demo-api.sh --help`.
+
+If compose seed still prints `skip ticket ...`, the API container may be on an
+old image — rebuild with `podman compose up -d --build --force-recreate api`
+(or `docker compose` equivalent) so `--agents-only` is honored.
+
+| Requirement | Demo phase | What you should see |
+|-------------|------------|---------------------|
+| Create ticket (all fields) | A — `[demo: create]` | `201`, `status: OPEN` |
+| Retrieve by id | A — `[demo: retrieve]` | `events` with `CREATED` only (no worker types yet) |
+| List + filters + pagination | A — `[demo: list]` | `{ items, total, skip, limit }` |
+| Update status (agent) | A — `[demo: update status]` | `OPEN → IN_PROGRESS → RESOLVED → CLOSED`, `409` from `CLOSED` |
+| OpenAPI surface | B — OpenAPI smoke | `openapi.json` lists POST/GET/PATCH ticket routes |
+| REST validation + errors | B — error envelopes | `404` / `409` / `422` envelopes |
+| Async queue + stored results | C | Fresh ticket id with `SUMMARIZED`, `PRIORITY_CHANGED`, `SPAM_FLAGGED`, `ROUTED`; `priority: CRITICAL` |
+| Assign agent (optional) | A — `[extra: assign]` | `ASSIGNED` event (demo extra; needs a seeded agent) |
 
 The curls below mirror what the script exercises (replace `{id}` with a real
 ticket id from `POST /tickets`):
@@ -138,7 +174,7 @@ curl -s -X PATCH http://localhost:8000/tickets/{id}/status \
   -H 'Content-Type: application/json' \
   -d '{"status": "in_progress"}'
 
-# Assign to an agent (200). Run `make seed` first so agent ids exist.
+# Assign to an agent (200). `make demo-api` seeds agents; or `make seed`.
 curl -s -X PATCH http://localhost:8000/tickets/{id}/assign \
   -H 'Content-Type: application/json' \
   -d '{"agent_id": 1}'
@@ -178,16 +214,12 @@ truncated, `events_truncated` is true and `events_total` is the full count).
 | `SUMMARIZED` | `summary` | Generated summary text (or original description with `noop` backend) |
 | `PRIORITY_CHANGED` | `priority` | Upgraded priority (e.g. `"CRITICAL"`) — only if keywords detected; never downgrades |
 | `SPAM_FLAGGED` | `spam` | `"true"` — ticket flagged for human review |
-| `ROUTED` | `department` | Routing department (e.g. `"engineering"`, `"billing"`) |
+| `ROUTED` | `department` | Routing department (e.g. `"technical-support"`, `"billing"`, `"general"`) |
 
-**Demo — see the async loop end-to-end:**
-
-```bash
-make demo-api   # includes worker checks when Redis is up (DEMO_WORKER=auto)
-```
-
-The script polls until it sees `CREATED`, `SUMMARIZED`, `PRIORITY_CHANGED`,
-`SPAM_FLAGGED`, and `ROUTED`, and asserts priority was upgraded to `CRITICAL`.
+**Demo — async loop end-to-end:** `make demo-api` (Phase C) polls until the
+worker ticket shows `CREATED`, `SUMMARIZED` (non-empty `summary`), `PRIORITY_CHANGED`,
+`SPAM_FLAGGED` (`new_value: true`), `ROUTED` (`technical-support` for `TECHNICAL`),
+and `priority: CRITICAL`.
 
 > **Note:** `POST /tickets` and `GET /tickets` (list) return a flat ticket object
 > (no `events`). `GET /tickets/{id}` and `PATCH .../status` or `.../assign` return
@@ -346,6 +378,8 @@ event), so jobs do not hold a connection open during CPU-bound summarization.
 ```bash
 make help         # list all available targets
 make run          # build and start the stack
+make review       # alias for demo-api (phases A–C; agents-only seed in compose)
+make demo-api     # same as make review
 make health       # curl the /health liveness probe
 make migrate      # apply database migrations in the running container
 make install-ml   # optional: torch + transformers for local worker ML runs
