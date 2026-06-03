@@ -49,7 +49,7 @@ help:
 	@echo "  container-test     Run tests in test container"
 	@echo "  container-coverage Run coverage in test container (writes coverage.xml)"
 	@echo "  migrate            Apply DB migrations in running API container"
-	@echo "  seed               Seed sample customers in running API container"
+	@echo "  seed               Seed sample support agents in running API container"
 	@echo ""
 	@echo "Run:"
 	@echo "  run                Run API in container (first-class default)"
