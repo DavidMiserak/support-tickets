@@ -73,6 +73,19 @@ async def test_agent(test_db: AsyncSession) -> int:
     return agent.id
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter() -> None:
+    """Clear in-memory rate limit counters before every test.
+
+    The limiter uses process-level MemoryStorage, so counters accumulate across
+    the test suite. Without this fixture, later tests that POST /tickets fail
+    with 429 once the session total exceeds the per-IP limit.
+    """
+    from app.rate_limit import limiter
+
+    limiter._storage.reset()
+
+
 @pytest.fixture
 def stub_arq_pool():
     """Stub the arq pool for all tests — prevents real Redis calls.

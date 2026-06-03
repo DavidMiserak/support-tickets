@@ -49,6 +49,8 @@ module = [
     "prometheus_fastapi_instrumentator.*",
     "pythonjsonlogger",
     "pythonjsonlogger.*",
+    "slowapi",
+    "slowapi.*",
 ]
 ignore_missing_imports = true
 

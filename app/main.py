@@ -17,6 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi.errors import RateLimitExceeded
 
 from app.api import tickets
 from app.arq_pool import get_arq_pool, set_arq_pool
@@ -28,6 +29,7 @@ from app.errors import (
     TicketError,
 )
 from app.logging_config import setup_logging
+from app.rate_limit import limiter
 
 # Configure JSON logging before anything else (including FastAPI app creation).
 # Uvicorn installs its own handlers after the app object is created; calling
@@ -92,6 +94,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Attach the rate limiter so slowapi can find it via app.state.
+app.state.limiter = limiter
+
 # Middleware order matters: FastAPI adds middleware in LIFO order, so the
 # middleware added FIRST here is the OUTERMOST (first to handle the request).
 # CorrelationIdMiddleware must be outermost so the request ID is set before
@@ -108,6 +113,20 @@ app.add_middleware(
 Instrumentator().instrument(app).expose(app)
 
 app.include_router(tickets.router)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(
+    request: Request, exc: RateLimitExceeded
+) -> JSONResponse:
+    """Return 429 in the standard {detail, error_type} envelope."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": f"rate limit exceeded — {exc.detail}",
+            "error_type": "rate_limit_exceeded",
+        },
+    )
 
 
 @app.exception_handler(TicketError)
