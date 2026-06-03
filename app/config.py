@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://redis:6379"
     summarizer_backend: str = "noop"
+    anthropic_api_key: str | None = None
     classifier_backend: str = "rules"
     classifier_model: str = "valhalla/distilbart-mnli-12-3"
     log_level: str = "INFO"

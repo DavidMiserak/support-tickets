@@ -14,6 +14,7 @@ patch ``_initialized_backend`` directly after init.
 import logging
 
 from app.config import settings
+from app.worker.backends.anthropic import AnthropicSummarizer
 from app.worker.backends.base import SummarizerBackend
 from app.worker.backends.noop import NoopSummarizer
 from app.worker.backends.transformer import TransformerSummarizer
@@ -22,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 _BACKENDS: dict[str, type] = {
     "transformer": TransformerSummarizer,
+    "anthropic": AnthropicSummarizer,
     "noop": NoopSummarizer,
-    # Phase 4: "anthropic": AnthropicSummarizer,
 }
 
-# Order used when the requested backend is unavailable.
-_FALLBACK_ORDER = ["transformer", "noop"]
+# Order used when the requested backend is unavailable. noop stays last so it is
+# always the final, dependency-free fallback.
+_FALLBACK_ORDER = ["transformer", "anthropic", "noop"]
 
 assert set(_FALLBACK_ORDER) == set(
     _BACKENDS

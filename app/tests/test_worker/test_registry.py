@@ -36,7 +36,7 @@ def test_registry_uses_import_time_settings_default() -> None:
 
 def test_registry_warns_and_falls_through_on_unknown_backend(monkeypatch, caplog):
     """Unknown backend value logs a warning and defaults to NoopSummarizer."""
-    monkeypatch.setattr(settings, "summarizer_backend", "anthropic")
+    monkeypatch.setattr(settings, "summarizer_backend", "gpt-5")
 
     with caplog.at_level(logging.WARNING, logger="app.worker.registry"):
         backend = registry_module.initialize_backend()
@@ -72,6 +72,22 @@ def test_registry_falls_through_when_load_model_fails(monkeypatch):
             "app.worker.backends.transformer.TransformerSummarizer.load_model",
             side_effect=OSError("model download failed"),
         ),
+    ):
+        backend = registry_module.initialize_backend()
+
+    assert isinstance(backend, NoopSummarizer)
+
+
+def test_registry_anthropic_without_key_falls_back_to_noop(monkeypatch):
+    """Requesting anthropic with no API key falls through to NoopSummarizer."""
+    monkeypatch.setattr(settings, "summarizer_backend", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+
+    # Force transformer unavailable too so the fallback deterministically lands
+    # on noop regardless of whether torch is installed in the test environment.
+    with patch(
+        "app.worker.backends.transformer.TransformerSummarizer.is_available",
+        return_value=False,
     ):
         backend = registry_module.initialize_backend()
 

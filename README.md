@@ -112,7 +112,8 @@ SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
 | -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `DATABASE_URL`             | Async SQLAlchemy connection URL (`+asyncpg`)               | `postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport` |
 | `REDIS_URL`                | Redis URL for the worker queue                             | `redis://redis:6379`                                                     |
-| `SUMMARIZER_BACKEND`       | Worker summarizer: `noop` or `transformer`                 | `noop` (worker service only)                                             |
+| `SUMMARIZER_BACKEND`       | Worker summarizer: `noop`, `transformer`, or `anthropic`   | `noop` (worker service only)                                             |
+| `ANTHROPIC_API_KEY`        | API key required by `SUMMARIZER_BACKEND=anthropic`         | (unset)                                                                  |
 | `CLASSIFIER_BACKEND`       | Worker priority/spam/routing: `rules` or `zeroshot`        | `rules` (worker service only)                                            |
 | `CLASSIFIER_MODEL`         | Zero-shot MNLI model (when `CLASSIFIER_BACKEND=zeroshot`)   | `valhalla/distilbart-mnli-12-3`                                          |
 | `LOG_LEVEL`                | Log verbosity: `DEBUG` `INFO` `WARNING` `ERROR` `CRITICAL` | `INFO`                                                                   |
@@ -332,6 +333,28 @@ The lean default `Containerfile` runtime image does not include
 `requirements-ml.txt`. To run transformer mode in Compose without a manual
 Dockerfile edit, use the `runtime-ml` image stage and the `compose.ml.yaml`
 overlay — see [Running ML backends in Compose](#running-ml-backends-in-compose).
+
+#### Anthropic summarizer
+
+A third backend summarizes via the Anthropic Messages API (Claude Haiku) instead
+of a local model — useful when you want higher-quality summaries without shipping
+torch/transformers. It needs no GPU and only a small dependency:
+
+1. Install the optional dep: `pip install -r requirements-optional.txt`
+2. Set `SUMMARIZER_BACKEND=anthropic` and `ANTHROPIC_API_KEY=sk-...` for the
+   worker process:
+
+   ```bash
+   SUMMARIZER_BACKEND=anthropic ANTHROPIC_API_KEY=sk-... \
+     python -m arq app.worker.main.WorkerSettings
+   ```
+
+The synchronous SDK call runs in `run_in_executor` so it never blocks the arq
+event loop (same pattern as the transformer backend). If `ANTHROPIC_API_KEY` is
+unset or the `anthropic` package is missing, the registry logs a warning and
+falls back to `NoopSummarizer` — the worker keeps running. `anthropic` is not in
+the default `requirements.txt` or the `Containerfile`, so the default stack
+installs nothing new.
 
 ### ML classifiers (optional)
 
