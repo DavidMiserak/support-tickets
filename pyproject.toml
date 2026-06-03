@@ -41,6 +41,14 @@ module = [
     "arq.*",
     "transformers.*",
     "torch.*",
+    "asgi_correlation_id",
+    "asgi_correlation_id.*",
+    "prometheus_client",
+    "prometheus_client.*",
+    "prometheus_fastapi_instrumentator",
+    "prometheus_fastapi_instrumentator.*",
+    "pythonjsonlogger",
+    "pythonjsonlogger.*",
 ]
 ignore_missing_imports = true
 

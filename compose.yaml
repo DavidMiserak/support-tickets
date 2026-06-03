@@ -9,6 +9,7 @@ services:
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379
+            LOG_LEVEL: INFO  # DEBUG|INFO|WARNING|ERROR|CRITICAL
         depends_on:
             db:
                 condition: service_healthy
@@ -42,6 +43,7 @@ services:
             # Default: noop (no model download). For transformer, extend the image
             # with requirements-ml.txt and set SUMMARIZER_BACKEND=transformer.
             SUMMARIZER_BACKEND: noop
+            LOG_LEVEL: INFO  # DEBUG|INFO|WARNING|ERROR|CRITICAL
         depends_on:
             db:
                 condition: service_healthy

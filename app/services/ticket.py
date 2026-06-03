@@ -8,6 +8,7 @@ state machine and translates an optimistic-lock clash into a domain error.
 import logging
 
 from arq.connections import ArqRedis
+from asgi_correlation_id import correlation_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -16,6 +17,11 @@ from app.errors import (
     ConcurrentUpdateError,
     InvalidStatusTransitionError,
     TicketNotFoundError,
+)
+from app.metrics import (
+    ticket_status_transitions_total,
+    ticket_summarization_outcomes_total,
+    tickets_created_total,
 )
 from app.models import Ticket, TicketEvent
 from app.repositories.ticket import TicketRepository
@@ -80,25 +86,38 @@ class TicketService:
         # on the returned instance, which the 201 response serializes.
         await self.session.refresh(ticket)
 
-        if self._arq_pool is not None:
+        tickets_created_total.inc()
+
+        if self._arq_pool is None:
+            ticket_summarization_outcomes_total.labels(outcome="skipped_no_pool").inc()
+        else:
             try:
                 # summarize-at-create, best-effort once: _job_id dedupes re-enqueue.
+                # Pass the correlation ID explicitly so the worker can restore it
+                # in its logging context (contextvars are not serialized to Redis).
                 job = await self._arq_pool.enqueue_job(
                     "summarize_ticket",
                     ticket.id,
                     _job_id=f"summarize-{ticket.id}",
+                    correlation_id=correlation_id.get(None),
                 )
                 if job is None:
                     logger.info(
                         "summarize_ticket already enqueued for ticket %d (deduped)",
                         ticket.id,
                     )
+                    ticket_summarization_outcomes_total.labels(outcome="deduped").inc()
+                else:
+                    ticket_summarization_outcomes_total.labels(outcome="enqueued").inc()
             except Exception:
                 logger.warning(
                     "Failed to enqueue summarization for ticket %d",
                     ticket.id,
                     exc_info=True,
                 )
+                ticket_summarization_outcomes_total.labels(
+                    outcome="enqueue_failed"
+                ).inc()
 
         return ticket
 
@@ -169,4 +188,7 @@ class TicketService:
             raise ConcurrentUpdateError(ticket_id) from exc
 
         await self.session.refresh(ticket)
+        ticket_status_transitions_total.labels(
+            from_status=previous.value, to_status=new_status.value
+        ).inc()
         return ticket

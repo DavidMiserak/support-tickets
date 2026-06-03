@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://redis:6379"
     summarizer_backend: str = "noop"
+    log_level: str = "INFO"
     debug: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
