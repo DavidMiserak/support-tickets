@@ -11,7 +11,7 @@ To override in tests, set ``SUMMARIZER_BACKEND`` in the environment (or
 
 import logging
 
-from app.config import Settings
+from app.config import settings
 from app.worker.backends.base import SummarizerBackend
 from app.worker.backends.noop import NoopSummarizer
 from app.worker.backends.transformer import TransformerSummarizer
@@ -60,7 +60,7 @@ def initialize_backend() -> SummarizerBackend:
     """
     global _initialized_backend
 
-    name = Settings().summarizer_backend
+    name = settings.summarizer_backend
 
     if name not in _BACKENDS:
         logger.warning(
