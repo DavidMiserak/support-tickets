@@ -134,7 +134,7 @@ assert_has_event() {
   local event_type=$1
   echo "$RESPONSE_BODY" | jq -e --arg t "$event_type" \
     '.events | map(.event_type) | index($t)' >/dev/null ||
-    fail "expected event_type $event_type in GET /tickets/{id} events"
+    fail "expected event_type $event_type in response events"
 }
 
 check_api_up() {
@@ -232,9 +232,8 @@ demo_happy_path() {
   request PATCH "$BASE_URL/tickets/$ticket_id/status" '{"status": "in_progress"}'
   assert_status 200
   assert_jq '.status' IN_PROGRESS
-  [[ "$(echo "$RESPONSE_BODY" | jq -r 'has("events")')" == "false" ]] ||
-    fail "PATCH /status must return TicketResponse without events"
-  pass "PATCH /tickets/$ticket_id/status -> IN_PROGRESS"
+  assert_has_event STATUS_CHANGED
+  pass "PATCH /tickets/$ticket_id/status -> IN_PROGRESS (includes events)"
 
   info "Assign agent (PATCH /tickets/{id}/assign)"
   request PATCH "$BASE_URL/tickets/$ticket_id/assign" "{\"agent_id\": $ASSIGN_AGENT_ID}"
@@ -250,7 +249,8 @@ demo_happy_path() {
   fi
   assert_status 200
   assert_jq '.assigned_agent_id' "$ASSIGN_AGENT_ID"
-  pass "PATCH /tickets/$ticket_id/assign -> agent $ASSIGN_AGENT_ID"
+  assert_has_event ASSIGNED
+  pass "PATCH /tickets/$ticket_id/assign -> agent $ASSIGN_AGENT_ID (includes events)"
 
   info "Idempotent assign (same agent again)"
   request PATCH "$BASE_URL/tickets/$ticket_id/assign" "{\"agent_id\": $ASSIGN_AGENT_ID}"
@@ -299,16 +299,18 @@ demo_error_envelopes() {
     ticket_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
   fi
 
-  info "Illegal status transition on fresh OPEN ticket (OPEN -> RESOLVED)"
-  local open_id
+  info "Illegal status transition (CLOSED is terminal -> OPEN)"
+  local closed_id
   request POST "$BASE_URL/tickets" \
     '{"customer_name":"Err","customer_email":"err-'$(date +%s)'@example.com","subject":"S","description":"D","category":"OTHER"}'
   assert_status 201
-  open_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
-  request PATCH "$BASE_URL/tickets/$open_id/status" '{"status": "RESOLVED"}'
+  closed_id=$(echo "$RESPONSE_BODY" | jq -r '.id')
+  request PATCH "$BASE_URL/tickets/$closed_id/status" '{"status": "CLOSED"}'
+  assert_status 200
+  request PATCH "$BASE_URL/tickets/$closed_id/status" '{"status": "OPEN"}'
   assert_status 409
   assert_error_type invalid_status_transition
-  pass "409 invalid_status_transition (OPEN -> RESOLVED)"
+  pass "409 invalid_status_transition (CLOSED -> OPEN)"
 
   request POST "$BASE_URL/tickets" \
     '{"customer_name":"X","customer_email":"not-an-email","subject":"S","description":"D","category":"OTHER"}'
