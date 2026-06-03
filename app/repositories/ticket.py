@@ -6,7 +6,6 @@ The repository owns SQLAlchemy: it builds queries and stages writes with
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.enums import Category, Priority, TicketStatus
 from app.models import Agent, Ticket, TicketEvent
@@ -35,14 +34,32 @@ class TicketRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_with_events(self, ticket_id: int) -> Ticket | None:
-        """Return a ticket by id with its events eager-loaded, or None."""
-        result = await self.session.execute(
-            select(Ticket)
-            .options(selectinload(Ticket.events))
-            .where(Ticket.id == ticket_id)
+    async def get_with_events(
+        self, ticket_id: int, *, event_limit: int
+    ) -> tuple[Ticket | None, list[TicketEvent], int]:
+        """Return a ticket, a bounded event slice, and the total event count.
+
+        Events are oldest-first. When there are more than ``event_limit`` rows,
+        only the most recent slice is returned (oldest omitted). Events are not
+        attached to ``ticket.events`` (relationship uses lazy="raise").
+        """
+        ticket = await self.get(ticket_id)
+        if ticket is None:
+            return None, [], 0
+
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(TicketEvent)
+            .where(TicketEvent.ticket_id == ticket_id)
         )
-        return result.scalar_one_or_none()
+        result = await self.session.execute(
+            select(TicketEvent)
+            .where(TicketEvent.ticket_id == ticket_id)
+            .order_by(TicketEvent.created_at.desc())
+            .limit(event_limit)
+        )
+        events = list(reversed(result.scalars().all()))
+        return ticket, events, int(total or 0)
 
     async def get_agent(self, agent_id: int) -> Agent | None:
         """Return a support agent by id, or None."""

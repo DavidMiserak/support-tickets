@@ -140,7 +140,7 @@ async def test_assign_agent_same_agent_is_idempotent_noop() -> None:
     result = await service.assign_agent(1, 7)
 
     assert result is ticket
-    repo.get_agent.assert_awaited_once_with(7)
+    repo.get_agent.assert_not_awaited()
     repo.add_event.assert_not_called()
     session.commit.assert_not_awaited()
 

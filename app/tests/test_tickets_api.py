@@ -3,6 +3,12 @@
 import pytest
 from httpx import AsyncClient
 from pytest import MonkeyPatch
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.enums import EventType
+from app.models import TicketEvent
+from app.repositories.ticket import TicketRepository
+from app.schemas import MAX_TICKET_EVENTS_ON_DETAIL
 
 VALID_TICKET = {
     "customer_name": "Ada Lovelace",
@@ -204,6 +210,8 @@ async def test_get_ticket_includes_created_event(async_client):
     assert "events" in body
     assert len(body["events"]) >= 1
     assert body["events"][0]["event_type"] == "CREATED"
+    assert body["events_total"] == len(body["events"])
+    assert body["events_truncated"] is False
 
 
 @pytest.mark.asyncio
@@ -346,3 +354,31 @@ async def test_assign_agent_concurrent_update_returns_409(
     )
     assert resp.status_code == 409
     assert resp.json()["error_type"] == "concurrent_update"
+
+
+@pytest.mark.asyncio
+async def test_get_ticket_events_truncated_when_over_limit(
+    async_client: AsyncClient, test_db: AsyncSession
+) -> None:
+    created = await _create(async_client)
+    raw_id = created["id"]
+    assert isinstance(raw_id, int)
+    ticket_id = raw_id
+    repo = TicketRepository(test_db)
+    for _ in range(MAX_TICKET_EVENTS_ON_DETAIL + 3):
+        repo.add_event(
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=EventType.STATUS_CHANGED,
+                field_changed="status",
+                previous_value="OPEN",
+                new_value="IN_PROGRESS",
+            )
+        )
+    await test_db.commit()
+
+    resp = await async_client.get(f"/tickets/{ticket_id}")
+    body = resp.json()
+    assert body["events_total"] == MAX_TICKET_EVENTS_ON_DETAIL + 4  # CREATED + extras
+    assert len(body["events"]) == MAX_TICKET_EVENTS_ON_DETAIL
+    assert body["events_truncated"] is True

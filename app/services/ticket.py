@@ -28,7 +28,7 @@ from app.metrics import (
 )
 from app.models import Ticket, TicketEvent
 from app.repositories.ticket import TicketRepository
-from app.schemas import CreateTicketRequest
+from app.schemas import MAX_TICKET_EVENTS_ON_DETAIL, CreateTicketRequest
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +151,15 @@ class TicketService:
                     ticket_worker_enqueue_outcomes_total.labels(
                         task=task, outcome="enqueue_failed"
                     ).inc()
+                elif outcome is None:
+                    logger.info(
+                        "%s already enqueued for ticket %d (deduped)",
+                        task,
+                        ticket.id,
+                    )
+                    ticket_worker_enqueue_outcomes_total.labels(
+                        task=task, outcome="deduped"
+                    ).inc()
                 else:
                     ticket_worker_enqueue_outcomes_total.labels(
                         task=task, outcome="enqueued"
@@ -165,12 +174,16 @@ class TicketService:
             raise TicketNotFoundError(ticket_id)
         return ticket
 
-    async def get_ticket_detail(self, ticket_id: int) -> Ticket:
-        """Return a ticket with its event history loaded, or raise TicketNotFoundError."""
-        ticket = await self.repo.get_with_events(ticket_id)
+    async def get_ticket_detail(
+        self, ticket_id: int
+    ) -> tuple[Ticket, list[TicketEvent], int]:
+        """Return a ticket, bounded events, and total event count."""
+        ticket, events, events_total = await self.repo.get_with_events(
+            ticket_id, event_limit=MAX_TICKET_EVENTS_ON_DETAIL
+        )
         if ticket is None:
             raise TicketNotFoundError(ticket_id)
-        return ticket
+        return ticket, events, events_total
 
     async def list_tickets(
         self,
@@ -251,12 +264,12 @@ class TicketService:
         """
         ticket = await self.get_ticket(ticket_id)
 
+        if ticket.assigned_agent_id == agent_id:
+            return ticket
+
         agent = await self.repo.get_agent(agent_id)
         if agent is None:
             raise AgentNotFoundError(agent_id)
-
-        if ticket.assigned_agent_id == agent_id:
-            return ticket
 
         previous = (
             str(ticket.assigned_agent_id)

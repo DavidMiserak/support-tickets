@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.metrics import (
     ticket_status_transitions_total,
     ticket_summarization_outcomes_total,
+    ticket_worker_enqueue_outcomes_total,
     tickets_created_total,
 )
 
@@ -211,6 +212,51 @@ async def test_summarization_outcome_deduped(test_db: AsyncSession) -> None:
     )
     after = _labeled_value(ticket_summarization_outcomes_total, outcome="deduped")
     assert after - before == pytest.approx(1)
+
+
+@pytest.mark.asyncio
+async def test_worker_enqueue_outcome_deduped(test_db: AsyncSession) -> None:
+    """Analysis-task dedupe (arq returns None) increments the 'deduped' label."""
+    from app.enums import Category
+    from app.repositories.ticket import TicketRepository
+    from app.schemas import CreateTicketRequest
+    from app.services.ticket import TicketService
+
+    mock_pool = AsyncMock()
+    mock_pool.enqueue_job.return_value = None
+
+    before = _labeled_value(
+        ticket_worker_enqueue_outcomes_total,
+        task="assign_priority",
+        outcome="deduped",
+    )
+    enqueued_before = _labeled_value(
+        ticket_worker_enqueue_outcomes_total,
+        task="assign_priority",
+        outcome="enqueued",
+    )
+    svc = TicketService(test_db, TicketRepository(test_db), arq_pool=mock_pool)
+    await svc.create_ticket(
+        CreateTicketRequest(
+            customer_name="Hank",
+            customer_email="hank@example.com",
+            subject="Worker dedup",
+            description="Testing worker enqueue deduped counter for analysis tasks",
+            category=Category.BILLING,
+        )
+    )
+    after = _labeled_value(
+        ticket_worker_enqueue_outcomes_total,
+        task="assign_priority",
+        outcome="deduped",
+    )
+    enqueued_after = _labeled_value(
+        ticket_worker_enqueue_outcomes_total,
+        task="assign_priority",
+        outcome="enqueued",
+    )
+    assert after - before == pytest.approx(1)
+    assert enqueued_after == enqueued_before
 
 
 @pytest.mark.asyncio

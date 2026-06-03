@@ -161,7 +161,8 @@ background jobs that run asynchronously:
 - Each job runs at most once (`max_tries=1`); failures are logged, not retried
 
 Worker results are written to `ticket_events` and returned in
-`GET /tickets/{id}` under the `events` array.
+`GET /tickets/{id}` under the `events` array (at most 100 events; when
+truncated, `events_truncated` is true and `events_total` is the full count).
 
 **Worker-emitted event types:**
 
@@ -182,8 +183,8 @@ The script polls until it sees `CREATED`, `SUMMARIZED`, `PRIORITY_CHANGED`,
 `SPAM_FLAGGED`, and `ROUTED`, and asserts priority was upgraded to `CRITICAL`.
 
 > **Note:** `POST /tickets` and `PATCH .../status` or `.../assign` return a flat
-> ticket object (no `events`). Call `GET /tickets/{id}` to see the full event
-> history.
+> ticket object (no `events`). Call `GET /tickets/{id}` to see the audit event
+> history (bounded; see `events_truncated` when older rows are omitted).
 
 **Summarizer backend:**
 
@@ -373,6 +374,11 @@ curl -s http://localhost:8000/tickets/2 | jq '.status, .events'
 - [x] Assign-agent REST endpoint — `PATCH /tickets/{id}/assign` sets
   `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
   `ASSIGNED` audit event; idempotent when already assigned to the same agent
+- [ ] **Authentication — deferred.** All endpoints are unauthenticated in this
+  take-home scope. In production: JWT bearer tokens issued at login, verified via
+  a FastAPI `Depends` guard, with the resolved agent/user identity passed as
+  `actor_id` on audit events. API key middleware is a simpler alternative for
+  server-to-server callers.
 
 ## License
 

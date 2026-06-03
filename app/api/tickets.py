@@ -17,6 +17,7 @@ from app.schemas import (
     ErrorEnvelope,
     ListTicketsResponse,
     TicketDetailResponse,
+    TicketEventResponse,
     TicketResponse,
     UpdateStatusRequest,
     ValidationErrorEnvelope,
@@ -65,9 +66,14 @@ async def create_ticket(
 async def get_ticket(
     ticket_id: Annotated[int, Path(ge=1)], service: ServiceDep
 ) -> TicketDetailResponse:
-    """Fetch a single ticket by id, including its full audit event history."""
-    ticket = await service.get_ticket_detail(ticket_id)
-    return TicketDetailResponse.model_validate(ticket)
+    """Fetch a single ticket by id, including a bounded audit event history."""
+    ticket, events, events_total = await service.get_ticket_detail(ticket_id)
+    return TicketDetailResponse(
+        **TicketResponse.model_validate(ticket).model_dump(),
+        events=[TicketEventResponse.model_validate(e) for e in events],
+        events_total=events_total,
+        events_truncated=events_total > len(events),
+    )
 
 
 @router.get(

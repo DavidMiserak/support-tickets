@@ -40,5 +40,5 @@ ticket_worker_enqueue_outcomes_total = Counter(
     "Outcomes of analysis worker task enqueue attempts at ticket creation time.",
     ["task", "outcome"],
     # task labels: assign_priority, detect_spam, route_ticket
-    # outcome labels: enqueued, enqueue_failed
+    # outcome labels: enqueued, deduped, enqueue_failed
 )
