@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=20,
-    max_overflow=10,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
     pool_recycle=3600,
 )
 

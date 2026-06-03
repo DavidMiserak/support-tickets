@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 # RESOLVED -> IN_PROGRESS. A status is never in its own set (same-status
 # updates are handled as idempotent no-ops, not transitions).
 ALLOWED_TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
-    TicketStatus.OPEN: {TicketStatus.IN_PROGRESS, TicketStatus.CLOSED},
+    TicketStatus.OPEN: {
+        TicketStatus.IN_PROGRESS,
+        TicketStatus.RESOLVED,  # auto-resolved without agent touch (e.g. duplicate close)
+        TicketStatus.CLOSED,
+    },
     TicketStatus.IN_PROGRESS: {
         TicketStatus.RESOLVED,
         TicketStatus.OPEN,
