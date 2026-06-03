@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -28,6 +29,16 @@ async_session_factory = async_sessionmaker(
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
+
+
+async def check_database_connection() -> bool:
+    """Return True if the database accepts a simple query."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
