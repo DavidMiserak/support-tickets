@@ -37,3 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `{"status": ..., "database": ..., "redis": ...}`
 
 ### Fixed
+
+- `LOG_LEVEL=DEBUG docker compose up` escape hatch now works; compose.yaml
+  used a literal `INFO` value that silently ignored the host environment
+- Redis URL credentials are redacted from startup log lines so passwords
+  in `REDIS_URL` never appear in structured log output
+- `CorrelationIdMiddleware` validator is now explicit (`is_valid_uuid4`),
+  matching the intent of the original plan decision
+- Test isolation: root logger handlers restored after logging-config tests so
+  `caplog`-based tests that follow are not silently broken
