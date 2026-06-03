@@ -70,6 +70,7 @@ async def summarize_ticket(ctx: dict[str, Any], ticket_id: int) -> None:
             event = TicketEvent(
                 ticket_id=ticket_id,
                 event_type=EventType.SUMMARIZED,
+                field_changed="summary",
                 new_value=summary,
             )
             session.add(event)

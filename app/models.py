@@ -77,7 +77,7 @@ class TicketEvent(Base):
         ),
         nullable=False,
     )
-    # Which ticket field this event describes (e.g. "status"); null for CREATED.
+    # Which ticket field this event describes (e.g. "status", "summary"); null for CREATED.
     field_changed: Mapped[str | None] = mapped_column(String(50))
     previous_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)

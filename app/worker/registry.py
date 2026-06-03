@@ -65,7 +65,7 @@ def initialize_backend() -> SummarizerBackend:
     if name not in _BACKENDS:
         logger.warning(
             "BackendRegistry: unknown SUMMARIZER_BACKEND=%r, valid values: %s. "
-            "Falling through to first available.",
+            "Defaulting to noop.",
             name,
             list(_BACKENDS),
         )

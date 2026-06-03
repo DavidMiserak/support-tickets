@@ -33,7 +33,7 @@ def test_registry_defaults_to_noop_when_env_unset(monkeypatch):
 
 
 def test_registry_warns_and_falls_through_on_unknown_backend(monkeypatch, caplog):
-    """Unknown backend value logs a warning and falls through to noop."""
+    """Unknown backend value logs a warning and defaults to NoopSummarizer."""
     monkeypatch.setenv("SUMMARIZER_BACKEND", "anthropic")
     import logging
 
@@ -42,6 +42,7 @@ def test_registry_warns_and_falls_through_on_unknown_backend(monkeypatch, caplog
 
     assert isinstance(backend, NoopSummarizer)
     assert "unknown SUMMARIZER_BACKEND" in caplog.text
+    assert "Defaulting to noop" in caplog.text
 
 
 def test_registry_falls_through_when_is_available_false(monkeypatch):

@@ -40,6 +40,7 @@ async def test_summarize_ticket_writes_summarized_event(ticket, worker_ctx, test
         )
     )
     event = result.scalar_one()
+    assert event.field_changed == "summary"
     assert event.new_value == ticket.description
 
 
