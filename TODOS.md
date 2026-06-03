@@ -1,4 +1,5 @@
 # TODOs
+
 <!-- markdownlint-disable MD013 -->
 
 Tracked work for the support ticket service. Derived from the /autoplan reviews
@@ -20,7 +21,7 @@ terminal** (reopen via RESOLVED→IN_PROGRESS); **`/assign` is deferred** (keep
 - [x] **Bound `description`.** Add `max_length` (~20_000) to `description` in `CreateTicketRequest` (`schemas.py:16`, currently unbounded `Text` — a client can POST a multi-MB body).
 - [x] **`lazy="raise"` on `Ticket.events`** (`models.py:45`) + `selectinload(Ticket.events)` where needed. Async SQLAlchemy raises `MissingGreenlet` on implicit lazy access. Note: do NOT add `events` to `TicketResponse` without a `selectinload`.
 - [x] **`TicketEvent` reshape.** Add `actor_id: int | None` (FK agents, nullable) and `field_changed: str | None`. Store `event_type` as **VARCHAR + CHECK** (Python `EventType` enum in app code: `CREATED`, `STATUS_CHANGED`, `PRIORITY_CHANGED`; `ASSIGNED` lands with `/assign` later). Existing native enums stay as documented known-debt.
-- [x] **`ON DELETE SET NULL` on BOTH agent FKs.** `assigned_agent_id` (`models.py:31`) *and* the new `actor_id` — keep tickets/audit history when an agent is deleted.
+- [x] **`ON DELETE SET NULL` on BOTH agent FKs.** `assigned_agent_id` (`models.py:31`) _and_ the new `actor_id` — keep tickets/audit history when an agent is deleted.
 - [x] **Migration must be exercised.** conftest currently builds schema via `Base.metadata.create_all` (`conftest.py:28`), so migrations are never tested. Add an `alembic upgrade head` + `downgrade` test against a scratch DB. The `String(50)`→CHECK change needs a **defensive data backfill** (existing lowercase `"created"` won't match the constraint); update `test_models.py:48` to the canonical value.
 
 ## Phase 2b — Layers + endpoints (do after 2a is green)
@@ -109,78 +110,77 @@ Deferred from Phase 4 (not an observability concept — ships as standalone PR).
 Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
 
 - [x] **`/health` Redis-degraded-to-503 causes container restart loop.** Fixed:
-  `/health` is now a pure liveness probe (200 unconditionally); Redis and DB
-  probes moved to new `/ready` readiness endpoint. Docker HEALTHCHECK targets
-  `/health` so Redis blips no longer trigger container restarts.
+      `/health` is now a pure liveness probe (200 unconditionally); Redis and DB
+      probes moved to new `/ready` readiness endpoint. Docker HEALTHCHECK targets
+      `/health` so Redis blips no longer trigger container restarts.
 - [x] **X-Request-ID format inconsistency.** Fixed: added
-  `generator=lambda: str(uuid4())` to `CorrelationIdMiddleware`; server-generated
-  IDs are now hyphenated UUID4 matching client-supplied IDs.
+      `generator=lambda: str(uuid4())` to `CorrelationIdMiddleware`; server-generated
+      IDs are now hyphenated UUID4 matching client-supplied IDs.
 - [x] **`/health` and `/ready` have no timeouts on DB/Redis probes.** Fixed:
-  wrapped both probes in `/ready` with `asyncio.wait_for(..., timeout=2.0)`.
+      wrapped both probes in `/ready` with `asyncio.wait_for(..., timeout=2.0)`.
 - [ ] **SQLAlchemy pool state under `asyncio.wait_for` cancellation storms.**
-  When `/ready` times out, `asyncio.wait_for` cancels the `check_database_connection()`
-  coroutine mid-flight. If the coroutine had acquired a pool connection before
-  the cancel, that connection may not be returned cleanly, leaking connections
-  under sustained timeouts. Client disconnects (which send `CancelledError` to
-  the request task) are an additional trigger for the same pool-drain path.
-  Fix: add `connect_args={"timeout": 1.5}` to the `create_async_engine` call
-  in `database.py` so asyncpg enforces its own connection timeout before
-  `wait_for` cancels it. Deferred — low risk for current single-instance deployment.
+      When `/ready` times out, `asyncio.wait_for` cancels the `check_database_connection()`
+      coroutine mid-flight. If the coroutine had acquired a pool connection before
+      the cancel, that connection may not be returned cleanly, leaking connections
+      under sustained timeouts. Client disconnects (which send `CancelledError` to
+      the request task) are an additional trigger for the same pool-drain path.
+      Fix: add `connect_args={"timeout": 1.5}` to the `create_async_engine` call
+      in `database.py` so asyncpg enforces its own connection timeout before
+      `wait_for` cancels it. Deferred — low risk for current single-instance deployment.
 - [ ] **`/ready` probes run sequentially (2+2=4s worst case).** Under dual-degraded
-  conditions (both DB and Redis have half-open TCP), each `await asyncio.wait_for(...)`
-  yields to the loop but the handler may not finish for up to 4 seconds, delaying
-  that readiness response (other requests can still run). Running both probes
-  concurrently with `asyncio.gather` would reduce worst-case latency to 2 seconds.
-  Deferred — only matters under simultaneous dual-failure which is rare in practice.
+      conditions (both DB and Redis have half-open TCP), each `await asyncio.wait_for(...)`
+      yields to the loop but the handler may not finish for up to 4 seconds, delaying
+      that readiness response (other requests can still run). Running both probes
+      concurrently with `asyncio.gather` would reduce worst-case latency to 2 seconds.
+      Deferred — only matters under simultaneous dual-failure which is rare in practice.
 
 ## Deferred from Phase 7 (polish) review
 
 - [x] **PATCH status/assign return `TicketDetailResponse`.** After write,
-  API reloads via `get_ticket_detail` so PATCH matches GET by id (bounded
-  `events`, including idempotent no-ops). Tradeoff: +2 queries per PATCH.
+      API reloads via `get_ticket_detail` so PATCH matches GET by id (bounded
+      `events`, including idempotent no-ops). Tradeoff: +2 queries per PATCH.
 
 - [x] **Assign-agent REST endpoint.** `PATCH /tickets/{id}/assign` sets
-  `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
-  `ASSIGNED` event, returns `TicketDetailResponse`.
+      `assigned_agent_id`, validates agent exists (404 `agent_not_found`), writes
+      `ASSIGNED` event, returns `TicketDetailResponse`.
 
 - [ ] **Makefile `container-up` exits silently on build failure.** If the build
-  fails or a port is in use, `compose up --build -d` exits 0 with no visible
-  error. Fix: append `|| (echo "Run 'make worker-logs' or 'make container-logs'
-  to debug" && exit 1)` to the `container-up` target.
+      fails or a port is in use, `compose up --build -d` exits 0 with no visible
+      error. Fix: append `|| (echo "Run 'make worker-logs' or 'make container-logs'
+to debug" && exit 1)` to the `container-up` target.
 
 - [ ] **Events endpoint as an alternative.** If strict REST sub-resource design
-  is preferred over embedding events in `TicketDetailResponse`, add
-  `GET /tickets/{id}/events` returning `list[TicketEventResponse]` with
-  pagination. The repo method and schema already exist.
+      is preferred over embedding events in `TicketDetailResponse`, add
+      `GET /tickets/{id}/events` returning `list[TicketEventResponse]` with
+      pagination. The repo method and schema already exist.
 
 ## Assessment gaps (deferred)
 
 - [ ] **Authentication.** All endpoints are unauthenticated. In production: JWT
-  bearer tokens verified via a FastAPI `Depends` guard, with the resolved agent
-  identity threaded through as `actor_id` on audit events. API-key middleware is
-  a simpler alternative for server-to-server callers. Documented in README.
+      bearer tokens verified via a FastAPI `Depends` guard, with the resolved agent
+      identity threaded through as `actor_id` on audit events. API-key middleware is
+      a simpler alternative for server-to-server callers. Documented in README.
 
 - [x] **Rate limiting.** `POST /tickets` rate-limited per IP via `slowapi`
-  (default `20/minute`, configurable via `RATE_LIMIT_CREATE_TICKET`). Returns
-  429 with the standard error envelope. In-memory storage — swap to
-  `limits.storage.RedisStorage` for multi-replica deployments.
+      (default `20/minute`, configurable via `RATE_LIMIT_CREATE_TICKET`). Returns
+      429 with the standard error envelope. In-memory storage — swap to
+      `limits.storage.RedisStorage` for multi-replica deployments.
 
 - [x] **Full-text search on `GET /tickets`.** `?q=` parameter searches subject
-  and description via `websearch_to_tsquery`; GIN expression index in migration
-  0006. Combines freely with status/priority/category filters.
+      and description via `websearch_to_tsquery`; GIN expression index in migration 0006. Combines freely with status/priority/category filters.
 
 - [ ] **Migration locking.** Migrations 0004 and 0005 use `DROP CONSTRAINT` +
-  `ADD CONSTRAINT CHECK` on `ticket_events`, which takes `ACCESS EXCLUSIVE` for
-  the full duration and stalls writes. For future event-type additions, split
-  into `ADD CONSTRAINT ... NOT VALID` (no lock) followed by `VALIDATE CONSTRAINT`
-  (only `SHARE UPDATE EXCLUSIVE`) in a separate transaction.
+      `ADD CONSTRAINT CHECK` on `ticket_events`, which takes `ACCESS EXCLUSIVE` for
+      the full duration and stalls writes. For future event-type additions, split
+      into `ADD CONSTRAINT ... NOT VALID` (no lock) followed by `VALIDATE CONSTRAINT`
+      (only `SHARE UPDATE EXCLUSIVE`) in a separate transaction.
 
 - [x] **Worker task boilerplate.** Extracted `_ticket_task` async context
-  manager: sets correlation ID, starts timer, logs "started", opens session,
-  fetches ticket, and emits the not-found warning. The three single-session
-  tasks (`assign_priority`, `detect_spam`, `route_ticket`) now contain only
-  domain logic. `summarize_ticket` is excluded — it uses two sessions to
-  release the DB connection during CPU-bound inference.
+      manager: sets correlation ID, starts timer, logs "started", opens session,
+      fetches ticket, and emits the not-found warning. The three single-session
+      tasks (`assign_priority`, `detect_spam`, `route_ticket`) now contain only
+      domain logic. `summarize_ticket` is excluded — it uses two sessions to
+      release the DB connection during CPU-bound inference.
 
 ## Roadmap (from design doc)
 
@@ -192,3 +192,18 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
 - [x] Phase 5 — observability hardening (liveness/readiness split, UUID4 fix, probe timeouts)
 - [x] Phase 6 — Docker/deploy polish
 - [x] Phase 7 — worker results visible in API response (`TicketDetailResponse`)
+
+## Multi-tenancy (deferred)
+
+**What it would take (9 layers, ~15 files):**
+
+1. New `tenants` table (id, name, api_key_hash, created_at) + migration 0007
+2. `tenant_id NOT NULL FK` added to `tickets`, `agents`, `ticket_events` + migration 0008
+3. Replace global `agents.email` uniqueness with `UNIQUE(tenant_id, email)`
+4. `app/auth.py`: `APIKeyAuth` FastAPI dependency resolving tenant from `X-API-Key` header
+5. All repo methods gain `tenant_id` parameter; all queries gain `AND tenant_id = :tid`
+6. `create_ticket`, `update_status`, `assign_agent` service methods thread `tenant_id` through
+7. Worker tasks gain `tenant_id: int | None` parameter; all 7 `TicketEvent` construction sites
+   need `tenant_id=tenant_id` (critical for audit trail)
+8. `POST /tenants` admin endpoint (protected by `X-Admin-Key`)
+9. ~35 existing API tests need `X-API-Key` header; all worker task fixtures need tenant row
