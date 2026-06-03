@@ -13,6 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.enums import EventType, Priority
 from app.models import Ticket, TicketEvent
+from app.worker.metrics import record_job
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ async def summarize_ticket(
             "summarize_ticket: ticket not found, skipping",
             extra={"ticket_id": ticket_id},
         )
+        record_job("summarize_ticket", "not_found")
         return
 
     description = ticket.description or ""
@@ -118,6 +120,7 @@ async def summarize_ticket(
             "summarize_ticket: description too short to summarize, skipping",
             extra={"ticket_id": ticket_id, "word_count": len(words)},
         )
+        record_job("summarize_ticket", "skipped")
         return
 
     try:
@@ -128,6 +131,7 @@ async def summarize_ticket(
             "summarize_ticket: summarizer raised, skipping event write",
             extra={"ticket_id": ticket_id, "elapsed_seconds": elapsed},
         )
+        record_job("summarize_ticket", "failed", start)
         return
 
     try:
@@ -146,6 +150,7 @@ async def summarize_ticket(
             "summarize_ticket: ticket deleted before event write, skipping",
             extra={"ticket_id": ticket_id},
         )
+        record_job("summarize_ticket", "not_found")
         return
 
     elapsed = round(time.monotonic() - start, 3)
@@ -157,6 +162,7 @@ async def summarize_ticket(
             "elapsed_seconds": elapsed,
         },
     )
+    record_job("summarize_ticket", "completed", start)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +193,7 @@ async def assign_priority(
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "assign_priority") as ctx_:
         if ctx_ is None:
+            record_job("assign_priority", "not_found")
             return
         session, ticket, start = ctx_
         try:
@@ -198,6 +205,7 @@ async def assign_priority(
                 "assign_priority: classifier raised, skipping",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("assign_priority", "failed", start)
             return
 
         if _PRIORITY_RANK[computed] <= _PRIORITY_RANK[ticket.priority]:
@@ -209,6 +217,7 @@ async def assign_priority(
                     "computed": computed.value,
                 },
             )
+            record_job("assign_priority", "completed", start)
             return
 
         previous = ticket.priority
@@ -231,6 +240,7 @@ async def assign_priority(
                 "assign_priority: concurrent update, skipping",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("assign_priority", "failed", start)
             return
 
         elapsed = round(time.monotonic() - start, 3)
@@ -243,6 +253,7 @@ async def assign_priority(
                 "elapsed_seconds": elapsed,
             },
         )
+        record_job("assign_priority", "completed", start)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +275,7 @@ async def detect_spam(
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "detect_spam") as ctx_:
         if ctx_ is None:
+            record_job("detect_spam", "not_found")
             return
         session, ticket, start = ctx_
         try:
@@ -275,10 +287,12 @@ async def detect_spam(
                 "detect_spam: classifier raised, treating as not spam",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("detect_spam", "failed", start)
             return
 
         if not flagged:
             logger.info("detect_spam: clean", extra={"ticket_id": ticket_id})
+            record_job("detect_spam", "completed", start)
             return
 
         try:
@@ -296,6 +310,7 @@ async def detect_spam(
                 "detect_spam: ticket deleted before event write, skipping",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("detect_spam", "not_found")
             return
 
         elapsed = round(time.monotonic() - start, 3)
@@ -303,6 +318,7 @@ async def detect_spam(
             "detect_spam: flagged",
             extra={"ticket_id": ticket_id, "elapsed_seconds": elapsed},
         )
+        record_job("detect_spam", "completed", start)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +340,7 @@ async def route_ticket(
     """
     async with _ticket_task(ctx, ticket_id, correlation_id, "route_ticket") as ctx_:
         if ctx_ is None:
+            record_job("route_ticket", "not_found")
             return
         session, ticket, start = ctx_
         try:
@@ -335,6 +352,7 @@ async def route_ticket(
                 "route_ticket: classifier raised, skipping",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("route_ticket", "failed", start)
             return
 
         try:
@@ -352,6 +370,7 @@ async def route_ticket(
                 "route_ticket: ticket deleted before event write, skipping",
                 extra={"ticket_id": ticket_id},
             )
+            record_job("route_ticket", "not_found")
             return
 
         elapsed = round(time.monotonic() - start, 3)
@@ -363,3 +382,4 @@ async def route_ticket(
                 "elapsed_seconds": elapsed,
             },
         )
+        record_job("route_ticket", "completed", start)

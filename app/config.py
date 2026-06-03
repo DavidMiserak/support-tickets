@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     db_pool_size: int = 20
     db_max_overflow: int = 10
     rate_limit_create_ticket: str = "20/minute"
+    worker_metrics_port: int = 9091
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 

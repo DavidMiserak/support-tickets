@@ -121,6 +121,7 @@ SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
 | `DB_POOL_SIZE`             | SQLAlchemy connection pool size per process                | `20`                                                                     |
 | `DB_MAX_OVERFLOW`          | Max connections above pool size per process                | `10`                                                                     |
 | `RATE_LIMIT_CREATE_TICKET` | Per-IP rate limit for `POST /tickets` (slowapi format)     | `20/minute`                                                              |
+| `WORKER_METRICS_PORT`      | Port for the worker's Prometheus `/metrics` endpoint       | `9091`                                                                   |
 
 ## API Documentation
 
@@ -562,6 +563,30 @@ Custom business counters:
 | `ticket_summarization_outcomes_total` | `outcome`                  | Enqueue outcomes at create time     |
 
 `outcome` label values: `enqueued`, `deduped`, `skipped_no_pool`, `enqueue_failed`.
+
+#### Worker metrics (separate port)
+
+The arq worker runs in its own process, so it exposes its own Prometheus endpoint
+on a dedicated port (default `9091`, set via `WORKER_METRICS_PORT`) rather than
+the API's `/metrics`. With the stack up, scrape it directly:
+
+```bash
+curl http://localhost:9091/metrics
+```
+
+| Metric                          | Labels            | Description                                          |
+| ------------------------------- | ----------------- | ---------------------------------------------------- |
+| `worker_jobs_total`             | `task`, `outcome` | Task executions by terminal outcome                  |
+| `worker_job_duration_seconds`   | `task`            | Histogram of task wall-clock duration                |
+| `worker_summarizer_backend_info`| `backend`         | Active summarizer backend in the worker process      |
+
+`task` values: `summarize_ticket`, `assign_priority`, `detect_spam`,
+`route_ticket`. `outcome` values: `completed`, `skipped`, `not_found`, `failed`.
+These cover **task execution** in the worker, complementing the API-side
+`ticket_summarization_outcomes_total`, which only tracks **enqueue** outcomes at
+create time. A scraper points at both `:8000/metrics` (API) and `:9091/metrics`
+(worker). The metrics server is best-effort — a bind failure is logged and the
+worker keeps processing jobs.
 
 ### Debugging a failed summarization (example flow)
 
