@@ -187,6 +187,7 @@ if you want transformer mode in Compose.
 ```bash
 make test         # run the test suite in a container (falls back to local)
 make coverage     # run tests with a coverage report
+make test-ml      # print a sample DistilBART summary + run ML integration test
 ```
 
 Tests run against an isolated `ticketsupport_test` database.

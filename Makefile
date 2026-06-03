@@ -34,6 +34,7 @@ help:
 	@echo "  coverage           Run coverage in container (default), fallback to local"
 	@echo "  local-test         Run tests locally against compose Postgres"
 	@echo "  local-coverage     Run coverage locally against compose Postgres"
+	@echo "  test-ml            Demo DistilBART summary + run ML pytest (requires install-ml)"
 	@echo "  validate           Validate local FastAPI/tooling setup"
 	@echo "  pre-commit-setup   Install and run pre-commit hooks"
 	@echo "  sonar              Run Sonar scan (requires SONAR_ORGANIZATION + SONAR_TOKEN)"
@@ -114,6 +115,11 @@ test-db:
 .PHONY: local-test
 local-test: install-dev test-db
 	$(PYTHON) -m pytest app/tests -q
+
+.PHONY: test-ml
+test-ml: install-ml
+	$(PYTHON) -m scripts.demo_ml_summary
+	$(PYTHON) -m pytest app/tests/test_worker/test_transformer.py -m ml -v
 
 .PHONY: local-coverage
 local-coverage: install-dev test-db
