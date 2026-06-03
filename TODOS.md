@@ -74,7 +74,7 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] **`make run` defaults to podman.** Auto-detect (`command -v podman || command -v docker`) or default to docker — docker-only evaluators currently hit "podman: command not found." (Fold into Phase 2 — it gates clone→first-call.)
 - [x] **`.env.example` default uses `db:5432`.** Footgun for local (non-container) runs. Ship `localhost` as default, comment the container override. (Fold into Phase 2.)
 - [x] **README endpoint docs.** Add copy-paste curl for `POST /tickets`, `GET /tickets/{id}`, `GET /tickets?status=OPEN`, `PATCH /tickets/{id}/status`, plus the error envelope + `error_type` table; tick the roadmap. (Phase 2 — first real API surface.)
-- [ ] **`make test` fallback masks errors.** `container-test || local-test` hides the real container failure behind a confusing local one. Make the fallback explicit.
+- [x] **`make test` fallback masks errors.** `container-test || local-test` hides the real container failure behind a confusing local one. Make the fallback explicit.
 - [x] **`make seed` references a missing script.** ~~`python -m scripts.seed` doesn't exist.~~ Done: `scripts/seed.py` seeds agents idempotently by email until `/assign` lands.
 
 ## Roadmap (from design doc)

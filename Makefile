@@ -143,11 +143,23 @@ container-coverage:
 
 .PHONY: test
 test:
-	@$(MAKE) container-test || $(MAKE) local-test
+	@$(MAKE) container-test || { \
+		echo ""; \
+		echo "Warning: container-test failed (see above). Falling back to local tests."; \
+		echo "  Run 'make container-test' alone to see the container error in isolation."; \
+		echo ""; \
+		$(MAKE) local-test; \
+	}
 
 .PHONY: coverage
 coverage:
-	@$(MAKE) container-coverage || $(MAKE) local-coverage
+	@$(MAKE) container-coverage || { \
+		echo ""; \
+		echo "Warning: container-coverage failed (see above). Falling back to local coverage."; \
+		echo "  Run 'make container-coverage' alone to see the container error in isolation."; \
+		echo ""; \
+		$(MAKE) local-coverage; \
+	}
 
 .PHONY: sonar
 sonar:
