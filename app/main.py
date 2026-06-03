@@ -3,13 +3,16 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from arq import create_pool
-from arq.connections import RedisSettings
-from fastapi import FastAPI, Request, status
+from arq.connections import ArqRedis, RedisSettings
+from asgi_correlation_id import CorrelationIdMiddleware
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api import tickets
 from app.arq_pool import get_arq_pool, set_arq_pool
@@ -20,6 +23,13 @@ from app.errors import (
     INTERNAL_SERVER_ERROR_TYPE,
     TicketError,
 )
+from app.logging_config import setup_logging
+
+# Configure JSON logging before anything else (including FastAPI app creation).
+# Uvicorn installs its own handlers after the app object is created; calling
+# setup_logging() here — at module level — ensures our formatter is in place
+# before uvicorn can overwrite the root logger.
+setup_logging(settings.log_level)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +70,17 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Middleware order matters: FastAPI adds middleware in LIFO order, so the
+# middleware added FIRST here is the OUTERMOST (first to handle the request).
+# CorrelationIdMiddleware must be outermost so the request ID is set before
+# the Prometheus instrumentator records the request.
+app.add_middleware(CorrelationIdMiddleware)
+
+# HTTP metrics: request count, latency histogram, in-flight gauge.
+# expose() registers GET /metrics on the default prometheus_client registry,
+# which also includes the business counters from app.metrics.
+Instrumentator().instrument(app).expose(app)
 
 app.include_router(tickets.router)
 
@@ -121,12 +142,34 @@ async def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
 
+async def _check_redis(pool: ArqRedis | None) -> bool:
+    """Return True if Redis accepts a ping, False otherwise."""
+    if pool is None:
+        return False
+    try:
+        await pool.ping()
+        return True
+    except Exception:
+        logger.warning("redis health check failed", exc_info=True)
+        return False
+
+
 @app.get("/health", tags=["health"])
-async def health() -> JSONResponse:
-    """Liveness/readiness: process is up and Postgres accepts queries."""
-    if not await check_database_connection():
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "degraded"},
-        )
-    return JSONResponse(content={"status": "ok", "database": "ok"})
+async def health(
+    arq_pool: Annotated[ArqRedis | None, Depends(get_arq_pool)],
+) -> JSONResponse:
+    """Liveness/readiness: process is up, Postgres accepts queries, Redis pings."""
+    db_ok = await check_database_connection()
+    redis_ok = await _check_redis(arq_pool)
+
+    all_ok = db_ok and redis_ok
+    return JSONResponse(
+        status_code=(
+            status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        content={
+            "status": "ok" if all_ok else "degraded",
+            "database": "ok" if db_ok else "unavailable",
+            "redis": "ok" if redis_ok else "unavailable",
+        },
+    )

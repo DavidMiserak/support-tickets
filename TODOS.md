@@ -77,11 +77,36 @@ Test plan: `~/.gstack/projects/DavidMiserak-support-tickets/david-feat-bg-proces
 - [x] **`make test` fallback masks errors.** `container-test || local-test` hides the real container failure behind a confusing local one. Make the fallback explicit.
 - [x] **`make seed` references a missing script.** ~~`python -m scripts.seed` doesn't exist.~~ Done: `scripts/seed.py` seeds agents idempotently by email until `/assign` lands.
 
+## Phase 4 — Observability (structured logging, Prometheus metrics)
+
+Plan: `docs/phase-4-rough-draft.md` (approved autoplan 2026-06-02)
+
+- [x] `app/logging_config.py` — `setup_logging()` + `RequestIdFilter` + `LOG_LEVEL` validation; call at module level in `main.py` and `worker/main.py`
+- [x] `app/metrics.py` — `tickets_created_total`, `ticket_status_transitions_total`, `ticket_summarization_outcomes_total` (delta-assertion tests)
+- [x] `CorrelationIdMiddleware` (outermost) + `prometheus-fastapi-instrumentator` (inner) in `app/main.py`; pass `validator=is_valid_uuid`
+- [x] Business counter increments in `TicketService.create_ticket` and `update_status`
+- [x] Pass correlation ID as explicit arq job arg; restore in `summarize_ticket`
+- [x] Redis health probe in `GET /health`; report `{"status":..., "database":..., "redis":...}`
+- [x] `elapsed_seconds` in worker complete/failure log records
+- [x] `LOG_LEVEL` in `Settings`, compose.yaml (api + worker), README env table
+- [x] README observability quickstart section + `/metrics` counter names documented
+- [x] Pin new dep versions in `requirements.txt`
+
+## Phase 4b — AnthropicSummarizer backend
+
+Deferred from Phase 4 (not an observability concept — ships as standalone PR).
+
+- [ ] `app/worker/backends/anthropic.py` — `AnthropicSummarizer` using `anthropic` SDK
+- [ ] Register `"anthropic"` in `BackendRegistry._BACKENDS`
+- [ ] `ANTHROPIC_API_KEY: str | None` in `Settings`
+- [ ] `requirements-optional.txt` for `anthropic` dep (mirrors `requirements-ml.txt`)
+
 ## Roadmap (from design doc)
 
 - [x] Phase 1 — foundation: models, migrations, config, `/health`
 - [x] Phase 2 — ticket CRUD API
 - [x] Phase 3 — background worker (arq)
-- [ ] Phase 4 — observability (structured logging, metrics)
+- [x] Phase 4 — observability (structured logging, metrics)
+- [ ] Phase 4b — AnthropicSummarizer backend (standalone PR)
 - [ ] Phase 5 — full test suite
 - [ ] Phase 6 — Docker/deploy polish

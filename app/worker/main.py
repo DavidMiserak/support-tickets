@@ -12,8 +12,12 @@ from arq.connections import RedisSettings
 
 from app.config import settings
 from app.database import async_session_factory
+from app.logging_config import setup_logging
 from app.worker.registry import initialize_backend
 from app.worker.tasks import summarize_ticket
+
+# Configure JSON logging at module level before arq starts any threads.
+setup_logging(settings.log_level)
 
 logger = logging.getLogger(__name__)
 

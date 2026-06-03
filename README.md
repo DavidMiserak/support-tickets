@@ -75,6 +75,7 @@ SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
 | `DATABASE_URL`        | Async SQLAlchemy connection URL (`+asyncpg`) | `postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport` |
 | `REDIS_URL`           | Redis URL for the worker queue               | `redis://redis:6379`                                                   |
 | `SUMMARIZER_BACKEND`  | Worker summarizer: `noop` or `transformer`   | `noop` (worker service only)                                           |
+| `LOG_LEVEL`           | Log verbosity: `DEBUG` `INFO` `WARNING` `ERROR` `CRITICAL` | `INFO`                                                  |
 | `DEBUG`               | Enable debug behavior                        | `false`                                                                |
 
 ## API Documentation
@@ -182,6 +183,80 @@ The runtime `Containerfile` does not include `requirements-ml.txt`; extend the
 worker image (e.g. `RUN pip install -r requirements-ml.txt` in a custom build)
 if you want transformer mode in Compose.
 
+## Observability
+
+### Structured JSON logs
+
+All log output is emitted as newline-delimited JSON. Every line includes
+`timestamp`, `level`, `logger`, `message`, and any structured fields from the
+call site (e.g. `ticket_id`, `elapsed_seconds`). API request lines also carry
+`request_id`, which matches the `X-Request-ID` response header — use it to
+correlate all lines for a single request, including worker jobs enqueued by that
+request.
+
+```bash
+# Tail JSON logs from the running stack
+docker compose logs -f api
+docker compose logs -f worker
+
+# Set DEBUG for verbose output
+LOG_LEVEL=DEBUG docker compose up
+```
+
+### Correlation IDs
+
+Every API request gets an `X-Request-ID` header in the response. Pass the same
+header on the request to inject your own trace ID (must be a valid UUID4):
+
+```bash
+curl -H "X-Request-ID: 550e8400-e29b-41d4-a716-446655440000" \
+     http://localhost:8000/health
+```
+
+### Prometheus metrics
+
+```bash
+# Scrape all metrics
+curl http://localhost:8000/metrics
+```
+
+HTTP metrics (`http_requests_total`, `http_request_duration_seconds`,
+`http_requests_inprogress`) are collected automatically per route.
+
+Custom business counters:
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `tickets_created_total` | — | Tickets created via `POST /tickets` |
+| `ticket_status_transitions_total` | `from_status`, `to_status` | Successful status transitions |
+| `ticket_summarization_outcomes_total` | `outcome` | Enqueue outcomes at create time |
+
+`outcome` label values: `enqueued`, `deduped`, `skipped_no_pool`, `enqueue_failed`.
+
+### Debugging a failed summarization (example flow)
+
+1. `docker compose logs -f worker | grep '"ticket_id": 42'`
+   — find all worker log lines for ticket 42.
+2. From the complete/error line, copy `"request_id": "abc-123"`.
+3. `docker compose logs -f api | grep '"request_id": "abc-123"'`
+   — find the `POST /tickets` that created it and its latency.
+4. `curl http://localhost:8000/metrics | grep ticket_summarization_outcomes`
+   — check outcome counters to see how many jobs are failing vs. succeeding.
+5. `curl http://localhost:8000/health`
+   — if `"redis": "unavailable"`, the worker never received the job.
+
+### Health endpoint
+
+`GET /health` probes both Postgres and Redis and returns per-component status:
+
+```json
+{"status": "ok",      "database": "ok",          "redis": "ok"}
+{"status": "degraded","database": "unavailable",  "redis": "ok"}
+{"status": "degraded","database": "ok",           "redis": "unavailable"}
+```
+
+HTTP 200 when both components are healthy; 503 when either is degraded.
+
 ## Testing
 
 ```bash
@@ -210,9 +285,9 @@ make clean        # remove caches and build artifacts
 - [x] Status transition validation (state machine + optimistic locking)
 - [x] Background worker — summarize-at-create, best-effort once
   (arq + pluggable backends)
+- [x] Structured JSON logging, Prometheus metrics, correlation IDs
 - [ ] Assign-agent endpoint + seed data script
 - [ ] Additional worker tasks (priority, routing)
-- [ ] Structured logging and metrics
 
 ## License
 

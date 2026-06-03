@@ -174,6 +174,40 @@ async def test_summarize_ticket_skips_on_pipeline_value_error(
     assert result.scalar_one_or_none() is None
 
 
+async def test_summarize_ticket_restores_correlation_id(ticket, worker_ctx):
+    """Correlation ID passed as an arg is set on the correlation_id context var
+    so it appears in all log lines emitted during the task.
+
+    Because the test awaits the coroutine directly (not via asyncio.create_task),
+    both share the same contextvars context, so the var is readable here after
+    the task sets it.
+    """
+    from asgi_correlation_id import correlation_id as corr_id_var
+
+    await summarize_ticket(worker_ctx, ticket.id, correlation_id="test-corr-id-xyz")
+
+    # The task calls correlation_id.set("test-corr-id-xyz"); since we're in the
+    # same asyncio context, that value is visible here after the await returns.
+    assert corr_id_var.get(None) == "test-corr-id-xyz"
+
+
+async def test_summarize_ticket_elapsed_seconds_in_complete_log(
+    ticket, worker_ctx, caplog
+):
+    """The complete log line includes an elapsed_seconds field."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.worker.tasks"):
+        await summarize_ticket(worker_ctx, ticket.id)
+
+    complete_records = [r for r in caplog.records if "complete" in r.getMessage()]
+    assert complete_records, "Expected a 'complete' log record"
+    record = complete_records[0]
+    assert hasattr(
+        record, "elapsed_seconds"
+    ), "Expected 'elapsed_seconds' attribute on complete log record"
+
+
 async def test_summarize_ticket_skips_when_ticket_deleted_before_write(
     ticket, test_db, worker_ctx
 ):
