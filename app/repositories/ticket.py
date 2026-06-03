@@ -29,6 +29,13 @@ class TicketRepository:
         self.session.add(event)
 
     async def get(self, ticket_id: int) -> Ticket | None:
+        """Return a ticket by id, or None. Events are not loaded."""
+        result = await self.session.execute(
+            select(Ticket).where(Ticket.id == ticket_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_with_events(self, ticket_id: int) -> Ticket | None:
         """Return a ticket by id with its events eager-loaded, or None."""
         result = await self.session.execute(
             select(Ticket)

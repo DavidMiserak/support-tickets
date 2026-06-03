@@ -5,6 +5,7 @@ events, and is the single place that commits. It also owns the status
 state machine and translates an optimistic-lock clash into a domain error.
 """
 
+import asyncio
 import logging
 
 from arq.connections import ArqRedis
@@ -22,6 +23,7 @@ from app.errors import (
 from app.metrics import (
     ticket_status_transitions_total,
     ticket_summarization_outcomes_total,
+    ticket_worker_enqueue_outcomes_total,
     tickets_created_total,
 )
 from app.models import Ticket, TicketEvent
@@ -121,31 +123,51 @@ class TicketService:
                 ).inc()
 
             _corr = correlation_id.get(None)
-            for task, job_prefix in (
+            _analysis = (
                 ("assign_priority", "assign-priority"),
                 ("detect_spam", "detect-spam"),
                 ("route_ticket", "route"),
-            ):
-                try:
-                    await self._arq_pool.enqueue_job(
+            )
+            results = await asyncio.gather(
+                *(
+                    self._arq_pool.enqueue_job(
                         task,
                         ticket.id,
-                        _job_id=f"{job_prefix}-{ticket.id}",
+                        _job_id=f"{prefix}-{ticket.id}",
                         correlation_id=_corr,
                     )
-                except Exception:
+                    for task, prefix in _analysis
+                ),
+                return_exceptions=True,
+            )
+            for (task, _), outcome in zip(_analysis, results):
+                if isinstance(outcome, BaseException):
                     logger.warning(
                         "Failed to enqueue %s for ticket %d",
                         task,
                         ticket.id,
-                        exc_info=True,
+                        exc_info=outcome,
                     )
+                    ticket_worker_enqueue_outcomes_total.labels(
+                        task=task, outcome="enqueue_failed"
+                    ).inc()
+                else:
+                    ticket_worker_enqueue_outcomes_total.labels(
+                        task=task, outcome="enqueued"
+                    ).inc()
 
         return ticket
 
     async def get_ticket(self, ticket_id: int) -> Ticket:
-        """Return a ticket or raise TicketNotFoundError."""
+        """Return a ticket or raise TicketNotFoundError. Events are not loaded."""
         ticket = await self.repo.get(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError(ticket_id)
+        return ticket
+
+    async def get_ticket_detail(self, ticket_id: int) -> Ticket:
+        """Return a ticket with its event history loaded, or raise TicketNotFoundError."""
+        ticket = await self.repo.get_with_events(ticket_id)
         if ticket is None:
             raise TicketNotFoundError(ticket_id)
         return ticket

@@ -69,6 +69,7 @@ async def test_agent(test_db: AsyncSession) -> int:
     agent = Agent(name="Assign Agent", email="assign-test@example.com")
     test_db.add(agent)
     await test_db.flush()
+    await test_db.commit()
     return agent.id
 
 

@@ -34,3 +34,11 @@ ticket_summarization_outcomes_total = Counter(
     # Note: "skipped_short" (description too short) is a worker-task event,
     # not observable at enqueue time, so it is not a label here.
 )
+
+ticket_worker_enqueue_outcomes_total = Counter(
+    "ticket_worker_enqueue_outcomes_total",
+    "Outcomes of analysis worker task enqueue attempts at ticket creation time.",
+    ["task", "outcome"],
+    # task labels: assign_priority, detect_spam, route_ticket
+    # outcome labels: enqueued, enqueue_failed
+)
