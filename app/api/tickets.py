@@ -2,6 +2,7 @@
 
 from typing import Annotated, Any
 
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, Query
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +32,7 @@ _UNPROCESSABLE: dict[int | str, dict[str, Any]] = {
 
 async def get_ticket_service(
     session: Annotated[AsyncSession, Depends(get_session)],
-    arq_pool: Annotated[Any | None, Depends(get_arq_pool)],
+    arq_pool: Annotated[ArqRedis | None, Depends(get_arq_pool)],
 ) -> TicketService:
     """Build the ticket service for a request (route -> service -> repo)."""
     return TicketService(session, TicketRepository(session), arq_pool)

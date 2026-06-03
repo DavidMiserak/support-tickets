@@ -6,8 +6,8 @@ state machine and translates an optimistic-lock clash into a domain error.
 """
 
 import logging
-from typing import Any
 
+from arq.connections import ArqRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -45,7 +45,7 @@ class TicketService:
         self,
         session: AsyncSession,
         repo: TicketRepository,
-        arq_pool: Any = None,
+        arq_pool: ArqRedis | None = None,
     ) -> None:
         self.session = session
         self.repo = repo
