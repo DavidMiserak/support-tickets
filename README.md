@@ -524,6 +524,12 @@ curl http://localhost:8000/metrics
 HTTP metrics (`http_requests_total`, `http_request_duration_seconds`,
 `http_requests_inprogress`) are collected automatically per route.
 
+The default `prometheus_client` process/platform/GC collectors (`process_*`,
+`python_info`, `python_gc_*`) are **unregistered** at startup (`app/main.py`), so
+`GET /metrics` exposes only the HTTP and business metrics below — no CPU, memory,
+open-FD, start-time, or interpreter internals. This keeps the endpoint safe to
+serve on the public API port without leaking operational details.
+
 Custom business counters:
 
 | Metric                                | Labels                     | Description                         |
