@@ -13,6 +13,7 @@ from arq.connections import RedisSettings
 from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import setup_logging
+from app.worker.classifier_registry import initialize_classifiers
 from app.worker.registry import initialize_backend
 from app.worker.tasks import (
     assign_priority,
@@ -32,6 +33,10 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     logger.info("worker: starting up")
     loop = asyncio.get_running_loop()
     ctx["summarizer"] = await loop.run_in_executor(None, initialize_backend)
+    classifiers = await loop.run_in_executor(None, initialize_classifiers)
+    ctx["priority_classifier"] = classifiers["priority"]
+    ctx["spam_classifier"] = classifiers["spam"]
+    ctx["routing_classifier"] = classifiers["routing"]
     ctx["session_factory"] = async_session_factory
     logger.info("worker: ready")
 

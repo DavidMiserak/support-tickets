@@ -1,7 +1,9 @@
 default: true
 MD007: false
-# Allow long lines inside tables (rows can't be wrapped).
+# Allow long lines inside tables and fenced code blocks (rows, command output,
+# and JSON examples can't be reflowed to 80 columns).
 MD013:
   tables: false
+  code_blocks: false
 # Long URL values make pipe alignment impractical; same rationale as MD013.
 MD060: false

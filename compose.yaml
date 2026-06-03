@@ -52,9 +52,12 @@ services:
         environment:
             DATABASE_URL: postgresql+asyncpg://ticketsupport:ticketsupport@db:5432/ticketsupport
             REDIS_URL: redis://redis:6379
-            # Default: noop (no model download). For transformer, extend the image
-            # with requirements-ml.txt and set SUMMARIZER_BACKEND=transformer.
+            # Lean defaults — no model download. To run the worker with ML
+            # backends (transformer summarizer + zero-shot classifiers), overlay
+            # compose.ml.yaml (`make run-ml`): it builds the runtime-ml image and
+            # flips these to transformer / zeroshot.
             SUMMARIZER_BACKEND: noop
+            CLASSIFIER_BACKEND: rules
             LOG_LEVEL: ${LOG_LEVEL:-INFO}  # override: LOG_LEVEL=DEBUG docker compose up
         depends_on:
             db:

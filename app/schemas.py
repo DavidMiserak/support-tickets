@@ -93,11 +93,13 @@ class TicketResponse(BaseModel):
 class TicketDetailResponse(TicketResponse):
     """Ticket detail response — includes a bounded audit event history.
 
-    Used by GET /tickets/{id}. Events are ordered by created_at ascending so
-    the CREATED event is always first and worker-written events follow in order.
-    At most MAX_TICKET_EVENTS_ON_DETAIL events are returned (most recent when
-    truncated); events_truncated is true and events_total reports the full count.
-    Not included in list responses to avoid N+1 queries on the collection.
+    Used by GET /tickets/{id}. Returned events are ordered by created_at ascending.
+    When the full history fits within the limit, the CREATED event is first and
+    later events follow in order. At most MAX_TICKET_EVENTS_ON_DETAIL events are
+    returned; when truncated, only the most recent slice is kept and the earliest
+    events (including CREATED) may be omitted. events_truncated is true and
+    events_total reports the full count. Not included in list responses to avoid
+    N+1 queries on the collection.
     """
 
     events: list[TicketEventResponse] = []
