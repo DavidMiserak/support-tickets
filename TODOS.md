@@ -177,11 +177,12 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   into `ADD CONSTRAINT ... NOT VALID` (no lock) followed by `VALIDATE CONSTRAINT`
   (only `SHARE UPDATE EXCLUSIVE`) in a separate transaction.
 
-- [ ] **Worker task boilerplate.** The four tasks (`summarize_ticket`,
-  `assign_priority`, `detect_spam`, `route_ticket`) repeat ~15 lines of identical
-  scaffold (set correlation ID, start timer, fetch ticket, guard on None, log
-  complete). Extract a shared async context manager or decorator that handles
-  the scaffold and yields the ticket, reducing each task to its domain logic.
+- [x] **Worker task boilerplate.** Extracted `_ticket_task` async context
+  manager: sets correlation ID, starts timer, logs "started", opens session,
+  fetches ticket, and emits the not-found warning. The three single-session
+  tasks (`assign_priority`, `detect_spam`, `route_ticket`) now contain only
+  domain logic. `summarize_ticket` is excluded — it uses two sessions to
+  release the DB connection during CPU-bound inference.
 
 ## Roadmap (from design doc)
 
