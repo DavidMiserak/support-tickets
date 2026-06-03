@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     summarizer_backend: str = "noop"
     log_level: str = "INFO"
     debug: bool = False
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 

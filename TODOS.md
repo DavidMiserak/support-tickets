@@ -155,6 +155,35 @@ Plan: `docs/phase-5-rough-draft.md` (APPROVED autoplan 2026-06-03)
   `GET /tickets/{id}/events` returning `list[TicketEventResponse]` with
   pagination. The repo method and schema already exist.
 
+## Assessment gaps (deferred)
+
+- [ ] **Authentication.** All endpoints are unauthenticated. In production: JWT
+  bearer tokens verified via a FastAPI `Depends` guard, with the resolved agent
+  identity threaded through as `actor_id` on audit events. API-key middleware is
+  a simpler alternative for server-to-server callers. Documented in README.
+
+- [ ] **Rate limiting.** `POST /tickets` is unbounded. Add per-IP or per-key
+  limits via `slowapi` (wraps `limits`/`redis`; integrates with FastAPI
+  middleware) or an upstream proxy (nginx, Traefik). Without Redis for state the
+  simplest option is a fixed-window in-process limiter.
+
+- [ ] **Full-text search on `GET /tickets`.** The list endpoint filters by
+  status/priority/category but not subject or description. Options: PostgreSQL
+  `tsvector`/`tsquery` (add a generated column + GIN index in a migration) or
+  `ILIKE` as a quick approximation. Neither requires a new service.
+
+- [ ] **Migration locking.** Migrations 0004 and 0005 use `DROP CONSTRAINT` +
+  `ADD CONSTRAINT CHECK` on `ticket_events`, which takes `ACCESS EXCLUSIVE` for
+  the full duration and stalls writes. For future event-type additions, split
+  into `ADD CONSTRAINT ... NOT VALID` (no lock) followed by `VALIDATE CONSTRAINT`
+  (only `SHARE UPDATE EXCLUSIVE`) in a separate transaction.
+
+- [ ] **Worker task boilerplate.** The four tasks (`summarize_ticket`,
+  `assign_priority`, `detect_spam`, `route_ticket`) repeat ~15 lines of identical
+  scaffold (set correlation ID, start timer, fetch ticket, guard on None, log
+  complete). Extract a shared async context manager or decorator that handles
+  the scaffold and yields the ticket, reducing each task to its domain logic.
+
 ## Roadmap (from design doc)
 
 - [x] Phase 1 — foundation: models, migrations, config, `/health`

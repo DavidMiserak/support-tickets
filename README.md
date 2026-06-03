@@ -77,6 +77,8 @@ SUMMARIZER_BACKEND=transformer python -m arq app.worker.main.WorkerSettings
 | `SUMMARIZER_BACKEND`  | Worker summarizer: `noop` or `transformer`   | `noop` (worker service only)                                           |
 | `LOG_LEVEL`           | Log verbosity: `DEBUG` `INFO` `WARNING` `ERROR` `CRITICAL` | `INFO`                                                  |
 | `DEBUG`               | Enable debug behavior                        | `false`                                                                |
+| `DB_POOL_SIZE`        | SQLAlchemy connection pool size per process  | `20`                                                                   |
+| `DB_MAX_OVERFLOW`     | Max connections above pool size per process  | `10`                                                                   |
 
 ## API Documentation
 
@@ -319,9 +321,10 @@ Tests run against an isolated `ticketsupport_test` database.
 ## Connection pool
 
 Each Python process (API **and** worker) creates its own SQLAlchemy pool
-(`app/database.py`: `pool_size=20`, `max_overflow=10` → up to **30**
-connections per process). The default Compose stack runs **two** processes, so
-plan for roughly **60** concurrent Postgres connections under burst load.
+(`DB_POOL_SIZE=20`, `DB_MAX_OVERFLOW=10` by default → up to **30**
+connections per process; tune via environment variables).
+The default Compose stack runs **two** processes, so plan for roughly
+**60** concurrent Postgres connections under burst load.
 
 PostgreSQL's default `max_connections` is **100**, which leaves modest headroom
 for admin sessions and migration tooling. Before scaling out — multiple uvicorn
