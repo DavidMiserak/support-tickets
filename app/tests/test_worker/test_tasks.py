@@ -1,5 +1,7 @@
 """Tests for the summarize_ticket arq task."""
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
 
@@ -180,15 +182,33 @@ async def test_summarize_ticket_restores_correlation_id(ticket, worker_ctx):
 
     Because the test awaits the coroutine directly (not via asyncio.create_task),
     both share the same contextvars context, so the var is readable here after
-    the task sets it.
+    the task sets it. Uses a UUID4-shaped ID like API ``X-Request-ID`` values.
     """
     from asgi_correlation_id import correlation_id as corr_id_var
 
-    await summarize_ticket(worker_ctx, ticket.id, correlation_id="test-corr-id-xyz")
+    request_id = str(uuid4())
+    prior = corr_id_var.set(None)
+    try:
+        await summarize_ticket(worker_ctx, ticket.id, correlation_id=request_id)
+        assert corr_id_var.get(None) == request_id
+    finally:
+        corr_id_var.reset(prior)
 
-    # The task calls correlation_id.set("test-corr-id-xyz"); since we're in the
-    # same asyncio context, that value is visible here after the await returns.
-    assert corr_id_var.get(None) == "test-corr-id-xyz"
+
+async def test_summarize_ticket_clears_stale_correlation_id(ticket, worker_ctx):
+    """A job with no correlation_id clears a value left by a prior job."""
+    from asgi_correlation_id import correlation_id as corr_id_var
+
+    stale_id = str(uuid4())
+    prior = corr_id_var.set(None)
+    try:
+        await summarize_ticket(worker_ctx, ticket.id, correlation_id=stale_id)
+        assert corr_id_var.get(None) == stale_id
+
+        await summarize_ticket(worker_ctx, ticket.id)
+        assert corr_id_var.get(None) is None
+    finally:
+        corr_id_var.reset(prior)
 
 
 async def test_summarize_ticket_elapsed_seconds_in_complete_log(

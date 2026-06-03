@@ -11,6 +11,19 @@ import logging
 from asgi_correlation_id import correlation_id
 from pythonjsonlogger.json import JsonFormatter
 
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
+
+def _resolve_log_level(level: str) -> int:
+    """Map a configured level name to the numeric logging constant."""
+    name = level.strip().upper()
+    if name not in _VALID_LOG_LEVELS:
+        raise ValueError(
+            f"Invalid LOG_LEVEL: {level!r}. "
+            "Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL."
+        )
+    return logging._nameToLevel[name]
+
 
 class RequestIdFilter(logging.Filter):
     """Inject the current correlation ID into every log record."""
@@ -26,12 +39,7 @@ def setup_logging(level: str = "INFO") -> None:
     Raises ValueError for unrecognised level names so misconfiguration surfaces
     immediately at startup rather than silently degrading to WARNING.
     """
-    numeric = logging.getLevelName(level.upper())
-    if not isinstance(numeric, int):
-        raise ValueError(
-            f"Invalid LOG_LEVEL: {level!r}. "
-            "Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL."
-        )
+    numeric = _resolve_log_level(level)
 
     handler = logging.StreamHandler()
     handler.setFormatter(
