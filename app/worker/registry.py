@@ -36,6 +36,7 @@ assert set(_FALLBACK_ORDER) == set(
 ), "FALLBACK_ORDER and BACKENDS are out of sync — add new backends to both"
 
 _initialized_backend: SummarizerBackend | None = None
+_initialized_backend_name: str | None = None
 
 
 def _try_init(cls: type, name: str) -> SummarizerBackend | None:
@@ -62,42 +63,49 @@ def initialize_backend() -> SummarizerBackend:
     entry in ``_FALLBACK_ORDER`` if the requested backend is unavailable or
     fails to load. Always returns a working backend (at minimum NoopSummarizer).
     """
-    global _initialized_backend
+    global _initialized_backend, _initialized_backend_name
 
-    name = settings.summarizer_backend
+    requested = settings.summarizer_backend
 
-    if name not in _BACKENDS:
+    if requested not in _BACKENDS:
         logger.warning(
             "BackendRegistry: unknown SUMMARIZER_BACKEND=%r, valid values: %s. "
             "Defaulting to noop.",
-            name,
+            requested,
             list(_BACKENDS),
         )
 
-    cls = _BACKENDS.get(name, NoopSummarizer)
-    backend = _try_init(cls, name)
+    attempt_name = requested if requested in _BACKENDS else "noop"
+    cls = _BACKENDS.get(requested, NoopSummarizer)
+    backend = _try_init(cls, attempt_name)
+    active_name = attempt_name if backend is not None else None
 
     if backend is None:
         for fallback_name in _FALLBACK_ORDER:
-            if fallback_name == name:
+            if fallback_name == attempt_name:
                 continue  # already tried this one
             backend = _try_init(_BACKENDS[fallback_name], fallback_name)
             if backend is not None:
+                active_name = fallback_name
                 logger.warning(
-                    "BackendRegistry: fell through from %r to %r", name, fallback_name
+                    "BackendRegistry: fell through from %r to %r",
+                    requested,
+                    fallback_name,
                 )
                 break
 
     if backend is None:
         logger.error("BackendRegistry: all backends unavailable, using NoopSummarizer")
         backend = NoopSummarizer()
+        active_name = "noop"
 
     logger.info(
         "BackendRegistry: initialized %s (requested: %s)",
         type(backend).__name__,
-        name,
+        requested,
     )
     _initialized_backend = backend
+    _initialized_backend_name = active_name
     return backend
 
 
@@ -113,3 +121,17 @@ def get_initialized_backend() -> SummarizerBackend:
             "on_startup did not complete — check worker startup logs for errors."
         )
     return _initialized_backend
+
+
+def get_initialized_backend_name() -> str:
+    """Return the registry key for the active backend (``noop`` / ``transformer`` / ``anthropic``).
+
+    Reflects the backend actually in use after any fallback, not the raw
+    ``SUMMARIZER_BACKEND`` setting value.
+    """
+    if _initialized_backend_name is None:
+        raise RuntimeError(
+            "BackendRegistry not initialized. "
+            "on_startup did not complete — check worker startup logs for errors."
+        )
+    return _initialized_backend_name
