@@ -240,7 +240,7 @@ async def assign_priority(
                 "assign_priority: concurrent update, skipping",
                 extra={"ticket_id": ticket_id},
             )
-            record_job("assign_priority", "failed", start)
+            record_job("assign_priority", "skipped", start)
             return
 
         elapsed = round(time.monotonic() - start, 3)

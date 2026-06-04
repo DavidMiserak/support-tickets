@@ -410,6 +410,37 @@ async def test_assign_priority_no_op_when_ticket_missing(worker_ctx, test_db):
     assert result.scalars().all() == []
 
 
+async def test_assign_priority_concurrent_update_records_skipped(worker_ctx, test_db):
+    """StaleDataError on commit is a no-op and counts as skipped, not failed."""
+    from unittest.mock import patch
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm.exc import StaleDataError
+
+    from app.worker.metrics import worker_jobs_total
+
+    def _jobs(outcome: str) -> float:
+        return float(
+            worker_jobs_total.labels(
+                task="assign_priority", outcome=outcome
+            )._value.get()
+        )
+
+    t = await _make_ticket(
+        test_db, description="This is urgent, system is completely down."
+    )
+    skipped_before = _jobs("skipped")
+    failed_before = _jobs("failed")
+
+    with patch.object(
+        AsyncSession, "commit", side_effect=StaleDataError("UPDATE", 1, 0)
+    ):
+        await assign_priority(worker_ctx, t.id)
+
+    assert _jobs("skipped") - skipped_before == 1.0
+    assert _jobs("failed") - failed_before == 0.0
+
+
 # ---------------------------------------------------------------------------
 # detect_spam tests
 # ---------------------------------------------------------------------------

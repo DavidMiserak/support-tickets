@@ -14,8 +14,10 @@ from app.worker.backends.noop import NoopSummarizer
 def reset_registry():
     """Reset the module-level singleton between tests."""
     registry_module._initialized_backend = None
+    registry_module._initialized_backend_name = None
     yield
     registry_module._initialized_backend = None
+    registry_module._initialized_backend_name = None
 
 
 def test_registry_selects_noop_when_settings_is_noop(
@@ -105,3 +107,29 @@ def test_get_initialized_backend_returns_singleton(monkeypatch):
     monkeypatch.setattr(settings, "summarizer_backend", "noop")
     backend = registry_module.initialize_backend()
     assert registry_module.get_initialized_backend() is backend
+
+
+def test_get_initialized_backend_name_returns_registry_key(monkeypatch):
+    """get_initialized_backend_name() returns the registry key, not the class name."""
+    monkeypatch.setattr(settings, "summarizer_backend", "noop")
+    registry_module.initialize_backend()
+    assert registry_module.get_initialized_backend_name() == "noop"
+
+
+def test_get_initialized_backend_name_reflects_fallback(monkeypatch):
+    """After fallback, the active registry key is reported (not the requested one)."""
+    monkeypatch.setattr(settings, "summarizer_backend", "transformer")
+
+    with patch(
+        "app.worker.backends.transformer.TransformerSummarizer.is_available",
+        return_value=False,
+    ):
+        registry_module.initialize_backend()
+
+    assert registry_module.get_initialized_backend_name() == "noop"
+
+
+def test_get_initialized_backend_name_raises_before_init():
+    """Calling get_initialized_backend_name() before initialize_backend() raises."""
+    with pytest.raises(RuntimeError, match="not initialized"):
+        registry_module.get_initialized_backend_name()

@@ -16,7 +16,7 @@ from app.database import async_session_factory
 from app.logging_config import setup_logging
 from app.worker.classifier_registry import initialize_classifiers
 from app.worker.metrics import worker_summarizer_backend
-from app.worker.registry import initialize_backend
+from app.worker.registry import get_initialized_backend_name, initialize_backend
 from app.worker.tasks import (
     assign_priority,
     detect_spam,
@@ -49,7 +49,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
     loop = asyncio.get_running_loop()
     ctx["summarizer"] = await loop.run_in_executor(None, initialize_backend)
-    worker_summarizer_backend.info({"backend": type(ctx["summarizer"]).__name__})
+    worker_summarizer_backend.info({"backend": get_initialized_backend_name()})
     classifiers = await loop.run_in_executor(None, initialize_classifiers)
     ctx["priority_classifier"] = classifiers["priority"]
     ctx["spam_classifier"] = classifiers["spam"]
